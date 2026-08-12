@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CV Studio · 本地求职工作台</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/macos.css">
+  </head>
+  <body data-theme="light">
+    <main id="landing-view" class="landing-view" aria-label="CV Studio 产品介绍">
+      <header class="landing-topbar">
+        <div class="landing-brand brand-lockup">
+          <span class="brand-mark">CV</span>
+          <div><strong>CV Studio</strong><span>本地求职工作台</span></div>
+        </div>
+        <div class="landing-actions">
+          <span class="privacy-note"><span class="status-dot"></span>本地优先 · 内容不出机</span>
+          <button id="landing-ai-settings" class="button secondary" type="button" title="配置所有 Agent 共用的模型"><i data-lucide="key-round"></i><span>AI 设置</span></button>
+          <button id="landing-theme-toggle" class="icon-button" type="button" aria-label="切换明暗模式" title="切换明暗模式"><i data-lucide="sun-moon"></i></button>
+          <button id="enter-workspace" class="button primary" type="button">进入工作台 <i data-lucide="arrow-right"></i></button>
+        </div>
+      </header>
+
+      <section class="landing-hero">
+        <div class="hero-copy">
+          <span class="eyebrow">YOUR NEXT MOVE, IN FOCUS</span>
+          <h1>把下一次面试，<br><em>变成你的主场。</em></h1>
+          <p>一个安静、专注、只在本机运行的求职工作台。从 LaTeX 简历到真实回答练习，把准备过程收拢在一个地方。</p>
+          <div class="hero-actions">
+            <button id="hero-enter" class="button primary hero-button" type="button">开始准备 <i data-lucide="arrow-right"></i></button>
+            <span class="hero-caption">无需账号 · 无需上传 · 为 macOS 打造</span>
+          </div>
+        </div>
+        <div class="hero-scene" aria-label="工作台功能概览">
+          <div class="scene-topline"><span>CV STUDIO / 0.10</span><span>LOCAL SESSION</span></div>
+          <div class="scene-card scene-resume">
+            <div class="scene-card-header"><span class="mini-mark">CV</span><span>resume.tex</span><span class="scene-state">● ready</span></div>
+            <div class="resume-lines"><i></i><i></i><i class="short"></i><b></b><i></i><i class="medium"></i><i></i></div>
+            <div class="scene-card-footer"><span>LaTeX editor</span><span class="orange-text">Tectonic built-in ↗</span></div>
+          </div>
+          <div class="scene-orbit orbit-one">✦</div>
+          <div class="scene-card scene-coach">
+            <span class="eyebrow">NEXT PRACTICE</span>
+            <strong>“讲一次你解决复杂问题的经历。”</strong>
+            <div class="coach-progress"><span></span></div>
+            <div class="scene-card-footer"><span>行为面试 · 01 / 03</span><span>→</span></div>
+          </div>
+          <div class="scene-note"><span class="note-dot"></span><span>三个入口，一个准备节奏</span></div>
+        </div>
+      </section>
+
+      <section class="feature-strip" aria-label="功能概览">
+        <article class="feature-item"><span class="feature-index">01</span><div><h2>编辑得更快</h2><p>直接编辑 LaTeX，内置渲染器即时预览 PDF。</p></div><i class="feature-arrow" data-lucide="chevron-right"></i></article>
+        <article class="feature-item"><span class="feature-index">02</span><div><h2>问得更具体</h2><p>让本地 Resume Agent 阅读整个项目并给出上下文建议。</p></div><i class="feature-arrow" data-lucide="chevron-right"></i></article>
+        <article class="feature-item"><span class="feature-index">03</span><div><h2>练得更像真的</h2><p>按方向逐题回答，获得反馈和下一步追问。</p></div><i class="feature-arrow" data-lucide="chevron-right"></i></article>
+      </section>
+      <footer class="landing-footer"><span>CV Studio / Built for thoughtful preparation</span><span>v0.10.0</span></footer>
+    </main>
+
+    <div id="app-view" class="app-shell" hidden>
+      <aside class="sidebar" aria-label="工作区功能导航">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-label="折叠侧栏" title="折叠侧栏">‹</button>
+        <div class="sidebar-header">
+          <button id="back-home" class="brand-lockup sidebar-brand" type="button" title="返回首页">
+            <span class="brand-mark">CV</span>
+            <span class="brand-copy"><strong>CV Studio</strong><small>LOCAL WORKSPACE</small></span>
+          </button>
+          <div class="sidebar-header-actions">
+            <span class="sidebar-version">0.10.0</span>
+          </div>
+        </div>
+        <div class="sidebar-section-label">WORKSPACE</div>
+        <nav class="sidebar-nav" aria-label="工作区导航">
+          <div class="sidebar-group">
+            <div class="sidebar-group-title"><span class="group-icon"><i data-lucide="database"></i></span><strong>材料库</strong><span class="group-line"></span></div>
+            <div class="sidebar-group-items">
+              <button class="sidebar-item" type="button" data-view="intake-view" title="粘贴杂乱材料并让 Agent 自动整理"><span class="side-icon"><i data-lucide="inbox"></i></span><span class="sidebar-item-copy"><strong>收件箱</strong><small>录入并整理新材料</small></span></button>
+              <button class="sidebar-item" type="button" data-view="bank-view" title="查看已整理材料的状态与版本信息"><span class="side-icon"><i data-lucide="database"></i></span><span class="sidebar-item-copy"><strong>信息银行</strong><small id="intake-sidebar-count">0 条已入库信息</small></span></button>
+            </div>
+          </div>
+          <div class="sidebar-group cv-library-group">
+            <div class="sidebar-group-title"><span class="group-icon"><i data-lucide="file-text"></i></span><strong>简历工作流</strong><span class="group-line"></span></div>
+            <div class="sidebar-group-items">
+              <button id="cv-library-button" class="sidebar-item cv-library-trigger" type="button" title="切换或创建独立简历项目"><span class="side-icon"><i data-lucide="library"></i></span><span class="sidebar-item-copy"><strong>我的简历</strong><small id="cv-library-count">1 个独立项目</small></span><i data-lucide="chevron-right"></i></button>
+              <button class="sidebar-item active" type="button" data-view="editor-view" title="简历编辑器"><span class="side-icon"><i data-lucide="code-2"></i></span><span class="sidebar-item-copy"><strong>简历编辑器</strong><small>LaTeX + PDF</small></span><kbd>1</kbd></button>
+            </div>
+          </div>
+          <div class="sidebar-group sidebar-group-secondary">
+            <div class="sidebar-group-title"><span class="group-icon"><i data-lucide="message-circle"></i></span><strong>面试准备</strong><span class="group-line"></span></div>
+            <div class="sidebar-group-items">
+            <button class="sidebar-item" type="button" data-view="interview-view" title="模拟面试"><span class="side-icon"><i data-lucide="message-circle"></i></span><span class="sidebar-item-copy"><strong>模拟面试</strong><small>逐题练习反馈</small></span><kbd>2</kbd></button>
+            </div>
+          </div>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-section-label">PREFERENCES</div>
+          <button id="global-ai-settings" class="sidebar-item theme-item" type="button" title="所有 Agent 共用的 Provider 与 API key"><span class="side-icon"><i data-lucide="key-round"></i></span><span class="sidebar-item-copy"><strong>AI Provider</strong><small id="global-ai-status">尚未配置</small></span></button>
+          <button id="theme-toggle" class="sidebar-item theme-item" type="button" aria-label="切换明暗模式" title="切换明暗模式"><span class="side-icon"><i data-lucide="sun-moon"></i></span><span class="sidebar-item-copy"><strong id="theme-label">浅色模式</strong><small>切换编辑器主题</small></span><kbd>⌘/</kbd></button>
+          <div class="engine-status"><span class="status-dot"></span><div><strong>内置 Tectonic</strong><small id="engine-label">离线渲染已就绪</small></div></div>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="app-topbar">
+          <div><span id="view-kicker" class="eyebrow">LATEX EDITOR</span><h1 id="view-title">编辑器</h1><p id="view-description">编辑源码，编译并查看你的简历。</p></div>
+          <div class="actions editor-toolbar"><span id="project-name" class="project-name" title="当前项目">workspace</span><label class="entry-picker editor-action" title="选择主文档"><span>主文档</span><select id="entry-file" aria-label="选择主文档"></select></label><span id="save-status" class="save-status" aria-live="polite">已保存</span><button id="open-folder-button" class="button secondary editor-action" type="button" title="打开本地 LaTeX 文件夹"><i data-lucide="folder-open"></i><span>打开</span></button><button id="zen-button" class="button secondary editor-action" type="button" title="专注模式 (Cmd/Ctrl+Shift+F)"><i data-lucide="focus"></i><span>专注</span></button><button id="save-button" class="button secondary editor-action" type="button" title="保存 (Cmd/Ctrl+S)"><i data-lucide="save"></i><span>保存</span></button><button id="compile-button" class="button primary editor-action" type="button" title="编译 (Cmd/Ctrl+Enter)"><i data-lucide="play"></i><span class="button-label">编译</span></button></div>
+        </header>
+
+        <section id="editor-view" class="view active-view" aria-label="编辑器工作区">
+          <div id="workspace" class="workspace">
+            <section class="editor-column" aria-label="LaTeX 项目编辑器">
+              <aside class="file-browser" aria-label="项目文件">
+                <div class="file-browser-header"><span>项目文件</span><button id="new-file-button" class="pane-icon-button" type="button" aria-label="新建文件" title="新建文件"><i data-lucide="file-plus-2"></i></button></div>
+                <div id="file-list" class="file-list" role="listbox" aria-label="LaTeX 项目文件"></div>
+              </aside>
+              <div id="file-splitter" class="file-splitter" role="separator" aria-label="调整文件列表宽度" aria-orientation="vertical" tabindex="0"></div>
+              <section class="pane editor-pane" aria-label="LaTeX 编辑器">
+                <div class="pane-header"><span id="active-file-label">resume.tex</span><span class="pane-header-actions"><span id="line-count">1 行</span><button class="pane-icon-button pane-toggle" type="button" data-panel="editor" aria-label="隐藏编辑器" title="隐藏编辑器">−</button></span></div>
+                <div id="editor" class="code-editor" aria-label="LaTeX 源码"></div>
+              </section>
+            </section>
+            <div id="vertical-splitter" class="workspace-splitter vertical-splitter" role="separator" aria-label="调整编辑器与预览宽度" aria-orientation="vertical" tabindex="0"></div>
+            <section class="right-column">
+              <section class="pane preview-pane" aria-label="PDF 预览">
+                <div class="pane-header"><span>PDF 预览</span><span class="pane-header-actions"><span id="compiler-label"></span><button class="pane-icon-button pane-toggle" type="button" data-panel="preview" aria-label="隐藏 PDF 预览" title="隐藏 PDF 预览">−</button></span></div>
+                <div id="preview-empty" class="preview-empty"><div class="document-icon" aria-hidden="true"></div><strong>等待首次编译</strong><span>点击右上角“编译”生成 PDF</span></div>
+                <div id="preview" class="pdf-viewer" hidden>
+                  <div class="pdf-toolbar" role="toolbar" aria-label="PDF 预览工具">
+                    <div class="pdf-tool-group pdf-page-tools">
+                      <button id="pdf-previous-page" class="pdf-tool-button" type="button" aria-label="上一页" title="上一页"><i data-lucide="chevron-left"></i></button>
+                      <label class="pdf-page-field"><input id="pdf-page-number" type="number" min="1" value="1" aria-label="当前页"><span>/ <span id="pdf-page-count">1</span></span></label>
+                      <button id="pdf-next-page" class="pdf-tool-button" type="button" aria-label="下一页" title="下一页"><i data-lucide="chevron-right"></i></button>
+                    </div>
+                    <span class="pdf-toolbar-divider" aria-hidden="true"></span>
+                    <div class="pdf-tool-group">
+                      <button id="pdf-zoom-out" class="pdf-tool-button" type="button" aria-label="缩小" title="缩小"><i data-lucide="zoom-out"></i></button>
+                      <span id="pdf-zoom-label" class="pdf-zoom-label" aria-live="polite">适宽</span>
+                      <button id="pdf-zoom-in" class="pdf-tool-button" type="button" aria-label="放大" title="放大"><i data-lucide="zoom-in"></i></button>
+                    </div>
+                    <select id="pdf-fit-mode" class="pdf-fit-select" aria-label="页面缩放方式" title="页面缩放方式">
+                      <option value="width">适合宽度</option>
+                      <option value="page">显示整页</option>
+                      <option value="actual">实际大小</option>
+                      <option value="custom" hidden>自定义</option>
+                    </select>
+                    <span class="pdf-toolbar-spacer"></span>
+                    <button id="pdf-review-button" class="pdf-tool-button pdf-review-launch" type="button" aria-label="进入 PDF 交互圈选模式" title="进入 PDF 交互圈选模式"><i data-lucide="scan-line"></i><span>圈选问 Agent</span></button>
+                    <button id="pdf-draw-region" class="pdf-tool-button pdf-review-only" type="button" aria-pressed="false" aria-label="在 PDF 上圈选区域" title="在 PDF 上圈选区域"><i data-lucide="pencil"></i><span>圈选</span></button>
+                    <button id="pdf-use-page" class="pdf-tool-button pdf-review-only" type="button" aria-label="把当前整页交给 Agent" title="键盘可用：把当前整页交给 Agent"><i data-lucide="image"></i><span>整页</span></button>
+                    <button id="pdf-clear-regions" class="pdf-tool-button pdf-review-only" type="button" aria-label="清除当前 PDF 的所有圈选" title="清除圈选"><i data-lucide="trash-2"></i></button>
+                    <button id="pdf-rotate" class="pdf-tool-button" type="button" aria-label="顺时针旋转" title="顺时针旋转"><i data-lucide="rotate-cw"></i></button>
+                    <button id="pdf-download" class="pdf-tool-button" type="button" aria-label="下载 PDF" title="下载 PDF"><i data-lucide="download"></i></button>
+                    <button id="pdf-exit-review" class="pdf-tool-button pdf-review-only" type="button" aria-label="退出 PDF 交互模式" title="退出 PDF 交互模式 (Esc)"><i data-lucide="x"></i></button>
+                  </div>
+                  <div id="pdf-review-guide" class="pdf-review-guide pdf-review-only" role="status">点击“圈选”后在页面上画圈；再点圈选区域即可把图片与 PDF 文字交给 Agent。</div>
+                  <div id="pdf-stage" class="pdf-stage" tabindex="0" aria-label="PDF 页面">
+                    <div id="pdf-page-shell" class="pdf-page-shell"><canvas id="pdf-canvas"></canvas><canvas id="pdf-annotation-canvas" aria-hidden="true"></canvas><div id="pdf-annotation-hits" class="pdf-annotation-hits" aria-label="PDF 圈选区域"></div></div>
+                    <div id="pdf-loading" class="pdf-loading" role="status" hidden>正在渲染 PDF…</div>
+                  </div>
+                </div>
+              </section>
+              <div id="horizontal-splitter" class="workspace-splitter horizontal-splitter" role="separator" aria-label="调整 PDF 与 Agent 高度" aria-orientation="horizontal" tabindex="0"></div>
+              <section id="agent-pane" class="pane agent-pane" aria-label="简历 Agent">
+                <div id="agent-window-header" class="pane-header agent-window-header"><span class="agent-window-title"><span class="pixel-agent-face tiny" aria-hidden="true"><i data-lucide="sparkles"></i></span><span class="agent-title-copy"><strong>Resume Agent</strong><small><i class="agent-status-orb" aria-hidden="true"></i><span id="agent-mode-label">LOCAL RULES</span></small></span></span><span class="pane-header-actions"><select id="agent-dock-position" class="agent-dock-select" aria-label="Agent 窗口位置" title="Agent 窗口位置"><option value="floating">悬浮</option><option value="right-bottom">停靠 · 右下</option><option value="right-top">停靠 · 右上</option><option value="left-bottom">停靠 · 左下</option><option value="left-full">停靠 · 左侧</option></select><button id="agent-clear-button" class="pane-icon-button" type="button" aria-label="新建 Agent 对话" title="清空当前对话"><i data-lucide="rotate-ccw"></i></button><button id="agent-pin-button" class="pane-icon-button" type="button" aria-label="固定 Agent" title="固定 Agent"><i data-lucide="pin"></i></button><button id="agent-settings-button" class="pane-icon-button" type="button" aria-label="配置模型" title="配置模型"><i data-lucide="settings-2"></i></button><button id="agent-minimize-button" class="pane-icon-button" type="button" aria-label="最小化 Agent" title="最小化 Agent"><i data-lucide="minus"></i></button></span></div>
+                <div id="agent-messages" class="agent-messages" aria-live="polite"><div class="agent-message assistant intro-message"><span>RESUME AGENT</span><p>本地检查可以立即分析结构；OpenAI / Anthropic 会用受限项目工具逐步读取、提案并临时编译，Hermes 则运行你自己的 Gateway Agent。</p></div></div>
+                <form id="agent-form" class="agent-composer"><div id="agent-visual-context" class="agent-visual-context" hidden><img id="agent-context-thumbnail" alt="当前 PDF 圈选区域"><span><strong id="agent-context-label">PDF 区域</strong><small id="agent-context-text">将随下一条消息发送</small></span><button id="agent-clear-context" type="button" aria-label="移除 PDF 视觉上下文" title="移除 PDF 视觉上下文"><i data-lucide="x"></i></button></div><textarea id="agent-input" rows="2" placeholder="问简历 Agent…  Enter 发送 · Shift+Enter 换行" aria-label="给简历 Agent 的消息"></textarea><button id="agent-send-button" class="agent-send-button" type="submit" aria-label="发送消息" title="发送消息 (Enter)"><i data-lucide="arrow-up"></i></button></form>
+                <div id="agent-resize-handle" class="agent-resize-handle" aria-hidden="true"></div>
+              </section>
+            </section>
+            <div id="panel-restore" class="panel-restore" hidden aria-label="恢复隐藏的面板"></div>
+            <div id="resize-hud" class="resize-hud" hidden aria-live="polite"></div>
+          </div>
+          <button id="zen-exit-button" class="zen-exit-button" type="button" aria-label="退出专注模式" title="退出专注模式 (Esc)">退出专注模式 <kbd>Esc</kbd></button>
+          <button id="pixel-agent-launcher" class="pixel-agent-launcher" type="button" aria-label="打开简历 Agent" aria-expanded="false" title="打开简历 Agent (Cmd/Ctrl+Shift+A)"><span class="pixel-agent-face" aria-hidden="true"><i data-lucide="sparkles"></i></span><span class="pixel-agent-label"><strong>Resume Agent</strong><small>Local · Ready</small></span><span class="pixel-agent-pulse" aria-hidden="true"></span></button>
+        </section>
+
+        <section id="intake-view" class="view tool-view intake-view" aria-label="材料库收件箱" hidden>
+          <div class="intake-layout">
+            <section class="tool-panel intake-capture-panel" aria-labelledby="intake-capture-title">
+              <div class="intake-panel-heading"><div><span class="eyebrow">ZERO-TO-ORGANIZED</span><h2 id="intake-capture-title">把乱七八糟的材料直接扔进来</h2><p>CV 全文、职位描述、HR 聊天截图、项目笔记、头像或其他文件都可以。Agent 会提取事实并分类；原始附件只作来源凭证。</p></div><span id="intake-provider-badge" class="intake-provider-badge">LOCAL RULES</span></div>
+              <label class="intake-box-label" for="intake-box">粘贴材料</label>
+              <textarea id="intake-box" class="intake-box" rows="11" aria-describedby="intake-box-help" placeholder="在这里 Cmd/Ctrl+V：可以一次粘贴杂乱文字，也可以直接粘贴截图。文件还可以拖进来。"></textarea>
+              <div id="intake-drop-zone" class="intake-drop-zone"><span id="intake-box-help">支持图片、PDF、文本和其他本地文件；单个文件不超过 5 MB，总计不超过 16 MB。</span><button id="intake-add-files" class="button secondary" type="button"><i data-lucide="file-plus-2"></i><span>添加文件</span></button><input id="intake-file-input" type="file" multiple hidden></div>
+              <div id="intake-attachments" class="intake-attachments" aria-live="polite"></div>
+              <div class="intake-capture-actions"><span class="helper-text">远程模型只在你点击分析时收到这次材料；本地模式不会上传。</span><button id="intake-analyze" class="button primary" type="button"><i data-lucide="sparkles"></i><span>分析并整理</span></button></div>
+            </section>
+
+            <section class="tool-panel intake-review-panel" aria-labelledby="intake-review-title">
+              <div class="panel-title"><strong id="intake-review-title">入库前确认</strong><span id="intake-review-status">尚未分析</span></div>
+              <div id="intake-review-empty" class="intake-review-empty"><span class="pixel-agent-face" aria-hidden="true"><i data-lucide="sparkles"></i></span><strong>Agent 会把来源变成可复用知识</strong><p>每条都能改分类、标题和提取内容。图片或扫描 PDF 若未被读懂，不能直接入库。</p></div>
+              <div id="intake-review-list" class="intake-review-list" aria-live="polite"></div>
+              <div id="intake-review-actions" class="intake-review-actions" hidden><button id="intake-reset" class="button secondary" type="button">重新开始</button><button id="intake-commit" class="button primary" type="button"><i data-lucide="save"></i><span>确认入库</span></button></div>
+            </section>
+          </div>
+
+        </section>
+
+        <section id="bank-view" class="view tool-view bank-view" aria-label="信息银行" hidden>
+          <section class="tool-panel material-bank-panel" aria-labelledby="material-bank-title">
+            <div class="material-bank-heading"><div><span class="eyebrow">LOCAL INFORMATION BANK</span><h2 id="material-bank-title">信息银行</h2><p>CV 会拆成独立的个人信息类目，不会整份入库。点击“全部 / 职位描述 / 个人信息”任一列可展开为主视图；每条记录保留状态和录入日期。</p></div><button id="intake-generate-cv" class="button primary" type="button"><i data-lucide="copy-plus"></i><span>生成新的简历</span></button></div>
+            <div id="material-bank-columns" class="material-bank-columns" data-active-kind="all" aria-label="信息银行三列视图">
+              <section class="material-bank-column active" data-kind="all">
+                <button class="material-bank-column-header" type="button" aria-expanded="true" aria-controls="bank-panel-all"><span class="material-bank-column-icon"><i data-lucide="list"></i></span><span class="material-bank-column-label"><strong>全部</strong><small>按重要程度汇总</small></span><span id="bank-count-all" class="material-bank-column-count">0</span></button>
+                <div id="bank-panel-all" class="material-bank-column-content"><div id="material-bank-list" class="material-bank-list" role="list" aria-label="全部已入库信息"></div></div>
+              </section>
+              <section class="material-bank-column" data-kind="job">
+                <button class="material-bank-column-header" type="button" aria-expanded="false" aria-controls="bank-panel-job"><span class="material-bank-column-icon"><i data-lucide="briefcase"></i></span><span class="material-bank-column-label"><strong>职位描述</strong><small>岗位与招聘信息</small></span><span id="bank-count-job" class="material-bank-column-count">0</span></button>
+                <div id="bank-panel-job" class="material-bank-column-content" aria-hidden="true" inert><div id="material-bank-list-job" class="material-bank-list" role="list" aria-label="职位描述信息"></div></div>
+              </section>
+              <section class="material-bank-column" data-kind="personal">
+                <button class="material-bank-column-header" type="button" aria-expanded="false" aria-controls="bank-panel-personal"><span class="material-bank-column-icon"><i data-lucide="user"></i></span><span class="material-bank-column-label"><strong>个人信息</strong><small>经历、能力与成果</small></span><span id="bank-count-personal" class="material-bank-column-count">0</span></button>
+                <div id="bank-panel-personal" class="material-bank-column-content" aria-hidden="true" inert><div id="material-bank-list-personal" class="material-bank-list" role="list" aria-label="个人信息"></div></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section id="interview-view" class="view tool-view" aria-label="模拟面试工作区" hidden>
+          <div class="tool-heading interview-heading"><div><span class="eyebrow">MOCK INTERVIEW</span><h2>练习一次真正的面试回答</h2><p>选择方向，逐题回答。每次提交后获得结构化反馈和下一步追问。</p></div><div id="interview-progress" class="progress-label">尚未开始</div></div>
+          <div class="interview-grid"><section class="tool-panel interview-setup" id="interview-setup"><div class="panel-title"><strong>开始一轮练习</strong><span>3 道题 · 本地评分</span></div><label for="interview-role">面试方向</label><select id="interview-role" class="select-input"><option value="behavioral">行为面试</option><option value="technical">技术面试</option><option value="product">产品面试</option></select><label for="interview-answer">你的回答</label><textarea id="interview-answer" class="light-textarea answer-textarea" placeholder="像真实面试一样回答。建议用“背景 - 行动 - 结果 - 复盘”组织内容。" disabled></textarea><div class="interview-actions"><button id="start-interview" class="button primary" type="button">开始面试</button><button id="submit-answer" class="button secondary" type="button" disabled>提交回答</button></div><p class="helper-text">回答不会离开本机。你可以随时切换回编辑器修改简历。</p></section><section class="tool-panel interview-coach" aria-live="polite"><div id="interview-empty" class="tool-empty"><div class="microphone-icon" aria-hidden="true"></div><strong>准备好开始了吗？</strong><span>启动后这里会显示当前问题和反馈</span></div><div id="interview-session" hidden><div class="question-meta"><span id="question-number">QUESTION 1</span><span id="question-role">行为面试</span></div><h3 id="interview-question">--</h3><div id="interview-feedback" class="feedback-block" hidden></div></div></section></div>
+        </section>
+      </div>
+    </div>
+    <dialog id="cv-library-dialog" class="project-dialog cv-library-dialog">
+      <form method="dialog">
+        <span class="eyebrow">MULTI-CV LIBRARY</span>
+        <h2>我的简历</h2>
+        <p>每个 CV 都是独立的本地项目文件夹，拥有自己的源码、资源、主文档和 Agent 对话。</p>
+        <div class="cv-library-actions"><button id="cv-library-import" class="button secondary" type="button"><i data-lucide="folder-plus"></i><span>导入现有 CV</span></button><button id="cv-library-duplicate" class="button primary" type="button"><i data-lucide="copy-plus"></i><span>复制当前 CV</span></button></div>
+        <div id="cv-library-list" class="cv-library-list" role="list" aria-label="CV 项目列表"></div>
+        <div class="dialog-actions"><button id="cv-library-close" class="button secondary" type="button">完成</button></div>
+      </form>
+    </dialog>
+    <dialog id="cv-duplicate-dialog" class="project-dialog cv-duplicate-dialog">
+      <form id="cv-duplicate-form">
+        <span class="eyebrow">DUPLICATE CURRENT CV</span>
+        <h2>创建独立 CV</h2>
+        <p>复制当前项目的嵌套源码、模板和图片。辅助编译文件、Git 数据与 CV Studio 回收区不会复制。</p>
+        <label for="cv-duplicate-name">新 CV 名称</label>
+        <input id="cv-duplicate-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：product-manager-cv" required>
+        <label for="cv-duplicate-parent">保存到父文件夹</label>
+        <div class="cv-parent-picker"><input id="cv-duplicate-parent" type="text" autocomplete="off" placeholder="/Users/you/Documents/CVs" required><button id="cv-duplicate-browse" class="button secondary" type="button">选择…</button></div>
+        <div class="dialog-actions"><button id="cv-duplicate-cancel" class="button secondary" type="button">取消</button><button id="cv-duplicate-submit" class="button primary" type="submit">创建并切换</button></div>
+      </form>
+    </dialog>
+    <dialog id="intake-generate-dialog" class="project-dialog intake-generate-dialog">
+      <form id="intake-generate-form">
+        <span class="eyebrow">GENERATE FROM MATERIAL BANK</span>
+        <h2>生成一个新的 CV 项目</h2>
+        <p>使用 CV 库和个人资料库的结构化内容，可选一个目标职位做关键词参考。每次生成都会创建并保留一个独立项目，自动加入“我的 CV”，不会覆盖已有版本。</p>
+        <label for="intake-generate-name">新 CV 名称</label>
+        <input id="intake-generate-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：jane-data-engineer-cv" required>
+        <label for="intake-generate-job">目标职位（可选）</label>
+        <select id="intake-generate-job" class="select-input"><option value="">不指定职位</option></select>
+        <label for="intake-generate-parent">保存到父文件夹</label>
+        <div class="cv-parent-picker"><input id="intake-generate-parent" type="text" autocomplete="off" placeholder="/Users/you/Documents/CVs" required><button id="intake-generate-browse" class="button secondary" type="button">选择…</button></div>
+        <p class="template-attribution">默认模板：<a href="https://github.com/geekplux/cv_resume" target="_blank" rel="noreferrer">geekplux/cv_resume</a> · MIT · CV Studio portable edition</p>
+        <div class="dialog-actions"><button id="intake-generate-cancel" class="button secondary" type="button">取消</button><button id="intake-generate-submit" class="button primary" type="submit">创建新 CV 并打开</button></div>
+      </form>
+    </dialog>
+    <dialog id="open-folder-dialog" class="project-dialog">
+      <form id="open-folder-form" method="dialog">
+        <span class="eyebrow">OPEN LATEX PROJECT</span>
+        <h2>打开本地简历文件夹</h2>
+        <p>CV Studio 会直接读取这个文件夹，并把保存操作写回原文件。字体、模板和嵌套章节都会保留。</p>
+        <label for="project-folder-path">文件夹绝对路径</label>
+        <input id="project-folder-path" type="text" autocomplete="off" placeholder="/Users/you/Documents/my-resume">
+        <div class="dialog-actions"><button id="cancel-open-folder" class="button secondary" type="button">取消</button><button class="button primary" type="submit">打开项目</button></div>
+      </form>
+    </dialog>
+    <dialog id="ai-settings-dialog" class="project-dialog ai-settings-dialog">
+      <form id="ai-settings-form" method="dialog">
+        <span class="eyebrow">GLOBAL AGENT PROVIDER</span>
+        <h2>所有 Agent，共用一次配置</h2>
+        <p>Resume Agent 与 PDF 视觉 Agent 都使用这里的 Provider。只有你主动请求远程 Agent 时，相关圈选图片和项目片段才会发送到所选地址。</p>
+        <div class="ai-settings-grid">
+          <label for="agent-provider">Provider</label><select id="agent-provider" class="agent-select"><option value="local">本地检查（非 AI）</option><option value="openai">OpenAI Agent</option><option value="anthropic">Anthropic Agent</option><option value="hermes">Hermes Gateway</option></select>
+          <label for="agent-model">Model</label><input id="agent-model" class="agent-input" type="text" placeholder="可选：使用 provider 默认模型">
+          <label for="agent-api-key">API key</label><input id="agent-api-key" class="agent-input" type="password" autocomplete="new-password" placeholder="仅保存在当前 App 浏览器存储">
+          <label for="agent-base-url">Base URL</label><input id="agent-base-url" class="agent-input" type="url" inputmode="url" autocomplete="off" placeholder="使用 Provider 默认地址">
+          <label for="agent-api-mode">API mode</label><select id="agent-api-mode" class="agent-select"><option value="responses">Responses API</option><option value="chat">Chat Completions</option></select>
+          <label for="agent-edit-mode">文件修改</label><select id="agent-edit-mode" class="agent-select"><option value="review">预览后应用</option><option value="auto">自动应用</option></select>
+        </div>
+        <p id="agent-provider-note" class="ai-provider-note">“本地检查”只运行确定性规则，不是假装成模型。</p>
+        <div class="dialog-actions"><button id="agent-cancel-settings" class="button secondary" type="button">取消</button><button id="agent-save-settings" class="button primary" type="submit">保存全局配置</button></div>
+      </form>
+    </dialog>
+    <section id="console" class="console" hidden aria-live="polite"><div class="console-header"><strong>编译输出</strong><button id="close-console" type="button" aria-label="关闭编译输出">×</button></div><pre id="console-output"></pre></section>
+    <script src="/app.bundle.js"></script>
+  </body>
+</html>
