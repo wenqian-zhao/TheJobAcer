@@ -72,6 +72,19 @@ test('softens major surfaces with selective glass and rounded corners', () => {
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
 });
 
+test('keeps the original lightweight motion without animated blur', () => {
+  const base = read('public/styles.css');
+  const macos = read('public/macos.css');
+  const app = read('public/app.js');
+
+  assert.match(base, /\.view-enter\s*\{\s*animation:\s*view-enter \.28s/);
+  assert.match(app, /animate\(targets,\s*\{\s*opacity:\s*\[0,\s*1\],\s*y:\s*\[14,\s*0\]\s*\}/);
+  assert.doesNotMatch(app, /function (?:revealGlass|dismissGlass)/);
+  assert.doesNotMatch(app, /filter:\s*\[[^\]]*blur/);
+  assert.doesNotMatch(base, /@keyframes (?:glass-surface|glass-item|bank-glass)/);
+  assert.doesNotMatch(macos, /glass-root-in|glass-wait/);
+});
+
 test('bundles an application-owned PDF.js viewer and aligned editor controls', () => {
   const html = read('public/index.html');
   const styles = read('public/macos.css');
@@ -190,6 +203,12 @@ test('provides a mixed-content Agent intake and animated three-column informatio
   assert.match(app, /function renderStructuredMaterial/);
   assert.match(app, /function materialStatusLabel/);
   assert.match(app, /function activateMaterialBankColumn/);
+  assert.match(app, /const firstRects = canStretch[\s\S]*?column\.getBoundingClientRect\(\)/);
+  assert.match(app, /const deltaX = firstCenter - lastCenter/);
+  assert.match(app, /scaleX:\s*\[initialScaleX, 1\]/);
+  assert.doesNotMatch(app, /scaleX:\s*\[initialScaleX,[^\]]*,\s*1\]/);
+  assert.match(app, /canStretch = shouldAnimate[\s\S]*?!reduceMotion\.matches/);
+  assert.doesNotMatch(app, /animateElement\(content,\s*\{[^}]*x:\s*\[18, 0\]/);
   assert.match(app, /PERSONAL_CATEGORY_META/);
   assert.match(app, /录入日期/);
   assert.match(app, /function updateIntakeCommitAvailability/);
@@ -203,6 +222,8 @@ test('provides a mixed-content Agent intake and animated three-column informatio
   assert.match(runtime, /extractionStatus/);
   assert.match(styles, /\.material-bank-list/);
   assert.match(styles, /\.material-bank-column\.active[^}]*flex:/);
+  assert.match(styles, /\.material-bank-columns\.is-stretching \.material-bank-column[^}]*transform-origin:\s*50% 50%/);
+  assert.match(styles, /\.material-bank-columns\.is-stretching \.material-bank-column-content[^}]*opacity:\s*0[^}]*transition:\s*opacity \.12s ease/);
   assert.match(styles, /cubic-bezier\(\.22, 1, \.36, 1\)/);
   assert.match(styles, /\.material-card-lifecycle/);
   assert.match(styles, /\.structured-material/);

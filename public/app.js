@@ -148,6 +148,8 @@ let intakeAttachments = [];
 let intakeSegments = [];
 let intakeBank = { items: [], counts: { job: 0, personal: 0 } };
 let intakeBankKind = 'all';
+let materialBankColumnAnimations = [];
+let materialBankTransitionToken = 0;
 let intakeRawHtml = '';
 let currentProjectRoot = '';
 let collapsedDirectories = new Set();
@@ -1002,9 +1004,27 @@ function createMaterialCard(item) {
 
 function activateMaterialBankColumn(kind, shouldAnimate = true) {
   if (!materialBankLists[kind]) return;
+  const columns = [...materialBankColumns.querySelectorAll('.material-bank-column')];
+  const nextColumn = columns.find((column) => column.dataset.kind === kind);
+  if (!nextColumn) return;
+  const previousColumn = columns.find((column) => column.classList.contains('active'));
+  const canStretch = shouldAnimate
+    && !reduceMotion.matches
+    && previousColumn !== nextColumn
+    && window.getComputedStyle(materialBankColumns).flexDirection === 'row';
+  const firstRects = canStretch
+    ? new Map(columns.map((column) => [column, column.getBoundingClientRect()]))
+    : null;
+
+  materialBankTransitionToken += 1;
+  materialBankColumnAnimations.forEach((playback) => playback.stop());
+  materialBankColumnAnimations = [];
+  columns.forEach((column) => column.style.removeProperty('transform'));
+  materialBankColumns.classList.toggle('is-stretching', canStretch);
+
   intakeBankKind = kind;
   materialBankColumns.dataset.activeKind = kind;
-  materialBankColumns.querySelectorAll('.material-bank-column').forEach((column) => {
+  columns.forEach((column) => {
     const active = column.dataset.kind === kind;
     const header = column.querySelector('.material-bank-column-header');
     const content = column.querySelector('.material-bank-column-content');
@@ -1012,7 +1032,33 @@ function activateMaterialBankColumn(kind, shouldAnimate = true) {
     header.setAttribute('aria-expanded', String(active));
     content.setAttribute('aria-hidden', String(!active));
     content.inert = !active;
-    if (active && shouldAnimate) animateElement(content, { opacity: [.25, 1], x: [18, 0], scale: [.985, 1] }, { duration: .46 });
+    if (active && shouldAnimate && !canStretch) animateElement(content, { opacity: [.25, 1] }, { duration: .26 });
+  });
+
+  if (!canStretch) return;
+  const transitionToken = materialBankTransitionToken;
+  const lastRects = new Map(columns.map((column) => [column, column.getBoundingClientRect()]));
+  const playbacks = columns.map((column) => {
+    const first = firstRects.get(column);
+    const last = lastRects.get(column);
+    const firstCenter = first.left + first.width / 2;
+    const lastCenter = last.left + last.width / 2;
+    const deltaX = firstCenter - lastCenter;
+    const initialScaleX = first.width / last.width;
+    return animate(column, {
+      x: [deltaX, 0],
+      scaleX: [initialScaleX, 1],
+    }, {
+      duration: .52,
+      ease: [.22, 1, .36, 1],
+    });
+  });
+  materialBankColumnAnimations = playbacks;
+  Promise.all(playbacks.map((playback) => playback.then(() => true, () => false))).then(() => {
+    if (transitionToken !== materialBankTransitionToken) return;
+    columns.forEach((column) => column.style.removeProperty('transform'));
+    materialBankColumnAnimations = [];
+    materialBankColumns.classList.remove('is-stretching');
   });
 }
 
