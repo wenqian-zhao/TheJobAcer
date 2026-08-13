@@ -11,16 +11,16 @@ import {
   ArrowRight, ArrowUp, Briefcase, ChevronLeft, ChevronRight, Code2, createIcons, Download,
   CopyPlus, Database, FilePlus2, FileText, Focus, FolderOpen, FolderPlus, Image, Inbox, KeyRound, Library, List,
   Maximize2, MessageCircle, Minus, Pencil, Pin, Play, RotateCcw, RotateCw, Save,
-  ScanLine, Settings2, Sparkles, SunMoon, Trash2, User, X, ZoomIn, ZoomOut,
+  ScanLine, Settings2, Sparkles, SquarePen, SunMoon, Trash2, User, X, ZoomIn, ZoomOut,
 } from 'lucide';
 import interact from 'interactjs';
-import { boundsForPoints, rotatePointClockwise, textForPdfRegion } from './pdf-context.mjs';
+import { boundsForPoints, rotatePointClockwise, textForPdfRegion, textLineForPdfItem } from './pdf-context.mjs';
 
 const lucideIcons = {
   ArrowRight, ArrowUp, Briefcase, ChevronLeft, ChevronRight, Code2, CopyPlus, Download,
   Database, FilePlus2, FileText, Focus, FolderOpen, FolderPlus, Image, Inbox, KeyRound, Library, Maximize2,
   List, MessageCircle, Minus, Pencil, Pin, Play, RotateCcw, RotateCw, Save, ScanLine,
-  Settings2, Sparkles, SunMoon, Trash2, User, X, ZoomIn, ZoomOut,
+  Settings2, Sparkles, SquarePen, SunMoon, Trash2, User, X, ZoomIn, ZoomOut,
 };
 GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -83,6 +83,8 @@ const pdfZoomLabel = document.querySelector('#pdf-zoom-label');
 const pdfFitMode = document.querySelector('#pdf-fit-mode');
 const pdfAnnotationCanvas = document.querySelector('#pdf-annotation-canvas');
 const pdfAnnotationHits = document.querySelector('#pdf-annotation-hits');
+const pdfInlineEditor = document.querySelector('#pdf-inline-editor');
+const pdfInlineReplacement = document.querySelector('#pdf-inline-replacement');
 const previewPane = document.querySelector('.preview-pane');
 const consolePanel = document.querySelector('#console');
 const consoleOutput = document.querySelector('#console-output');
@@ -115,6 +117,8 @@ const projectName = document.querySelector('#project-name');
 const cvLibraryDialog = document.querySelector('#cv-library-dialog');
 const cvLibraryList = document.querySelector('#cv-library-list');
 const cvLibraryCount = document.querySelector('#cv-library-count');
+const cvLibraryOpenEditor = document.querySelector('#cv-library-open-editor');
+const cvLibrarySelectionStatus = document.querySelector('#cv-library-selection-status');
 const cvDuplicateDialog = document.querySelector('#cv-duplicate-dialog');
 const cvDuplicateForm = document.querySelector('#cv-duplicate-form');
 const intakeBox = document.querySelector('#intake-box');
@@ -126,30 +130,59 @@ const intakeReviewActions = document.querySelector('#intake-review-actions');
 const intakeReviewStatus = document.querySelector('#intake-review-status');
 const materialBankColumns = document.querySelector('#material-bank-columns');
 const materialBankLists = {
-  all: document.querySelector('#material-bank-list'),
   job: document.querySelector('#material-bank-list-job'),
   personal: document.querySelector('#material-bank-list-personal'),
 };
+const materialBankPagination = {
+  job: document.querySelector('#material-bank-pagination-job'),
+  personal: document.querySelector('#material-bank-pagination-personal'),
+};
+const materialBankDensity = document.querySelector('#material-bank-density');
+const materialBankPageSize = document.querySelector('#material-bank-page-size');
+const materialBankSearch = document.querySelector('#material-bank-search');
+const materialBankCategory = document.querySelector('#material-bank-category');
+const materialBankSelectAll = document.querySelector('#material-bank-select-all');
+const materialBankInvertSelection = document.querySelector('#material-bank-invert-selection');
+const materialBankClearSelection = document.querySelector('#material-bank-clear-selection');
+const materialBankSelectionStatus = document.querySelector('#material-bank-selection-status');
+const materialBankDeleteSelected = document.querySelector('#material-bank-delete-selected');
 const intakeGenerateDialog = document.querySelector('#intake-generate-dialog');
 const intakeGenerateForm = document.querySelector('#intake-generate-form');
+const intakeGenerateSetup = document.querySelector('#intake-generate-setup');
+const intakeGenerateProgress = document.querySelector('#intake-generate-progress');
+const intakeGenerateFit = document.querySelector('#intake-generate-fit');
+const intakeGenerateTemplates = document.querySelector('#intake-generate-templates');
 const resizeHud = document.querySelector('#resize-hud');
 const editorTheme = new Compartment();
 const viewMeta = {
   'editor-view': ['LATEX EDITOR', '编辑器', '编辑源码，编译并查看你的简历。'],
   'intake-view': ['MATERIAL LIBRARY · INBOX', '收件箱', '录入新材料，由 Agent 提取并整理为可复用信息。'],
-  'bank-view': ['MATERIAL LIBRARY · INFORMATION BANK', '信息银行', '查看已入库信息的基本内容、当前状态和录入日期。'],
+  'bank-view': ['MATERIAL LIBRARY · INFORMATION BANK', '信息银行', '查看已入库信息的基本内容、类别和录入日期。'],
   'interview-view': ['MOCK INTERVIEW', '模拟面试', '用几轮练习，把回答说得更清楚。'],
 };
 
 let projectFiles = new Map();
 let projectEntries = [];
 let cvLibrary = [];
+let selectedCvProjectRoot = '';
 let intakeAttachments = [];
 let intakeSegments = [];
 let intakeBank = { items: [], counts: { job: 0, personal: 0 } };
-let intakeBankKind = 'all';
+let intakeBankKind = 'personal';
+let intakeBankDensity = 'compact';
+let intakeBankPageSize = 10;
+let intakeBankPages = { job: 1, personal: 1 };
+let materialBankSearchQuery = '';
+let materialBankCategoryFilter = 'all';
+let selectedMaterialIds = new Set();
+let expandedMaterialIds = new Set();
+let collapsedMaterialIds = new Set();
 let materialBankColumnAnimations = [];
 let materialBankTransitionToken = 0;
+let intakeGenerationItemIds = [];
+let intakeGenerationActive = false;
+let intakeGenerationAbortController = null;
+let intakeAnalyzedSource = null;
 let intakeRawHtml = '';
 let currentProjectRoot = '';
 let collapsedDirectories = new Set();
@@ -177,6 +210,8 @@ let pdfAnnotations = [];
 let pdfAnnotationDraft = null;
 let pdfAnnotationDrawing = false;
 let pdfReviewActive = false;
+let pdfInlineEditActive = false;
+let pdfInlineSelection = null;
 let pdfModeBeforeReview = 'width';
 let activeVisualContext = null;
 let nextAnnotationId = 1;
@@ -258,12 +293,25 @@ function showError(message, details = '') {
 
 async function request(url, options) {
   const response = await fetch(url, options);
-  const body = await response.json();
+  const rawBody = await response.text();
+  let body = {};
+  let responseWasJson = false;
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody);
+      responseWasJson = true;
+    } catch {
+      body = { error: rawBody.trim() || 'The server returned an invalid response.' };
+    }
+  }
   if (!response.ok) {
     const error = new Error(body.error || 'Request failed.');
     error.details = body.details || '';
+    error.status = response.status;
+    error.responseWasJson = responseWasJson;
     throw error;
   }
+  if (rawBody && !responseWasJson) throw new Error('The server returned a non-JSON response.');
   return body;
 }
 
@@ -406,22 +454,34 @@ function renderCvLibrary() {
   if (!cvLibraryList) return;
   cvLibraryList.replaceChildren();
   cvLibraryCount.textContent = `${cvLibrary.length} 个独立项目`;
+  const selectedProject = cvLibrary.find((project) => project.root === selectedCvProjectRoot);
+  cvLibraryOpenEditor.disabled = !selectedProject;
+  cvLibraryOpenEditor.title = selectedProject ? `在编辑器中打开 ${selectedProject.name}` : '请先选择一份 CV';
+  cvLibraryOpenEditor.setAttribute('aria-label', cvLibraryOpenEditor.title);
+  cvLibrarySelectionStatus.textContent = selectedProject
+    ? `已选择“${selectedProject.name}”`
+    : '选择一份 CV 后，即可进入简历编辑器。';
   if (!cvLibrary.length) {
     cvLibraryList.append(element('p', 'cv-library-empty', '还没有保存的 CV 项目。导入文件夹或复制当前 CV 开始。'));
     return;
   }
   cvLibrary.forEach((project) => {
     const current = project.root === currentProjectRoot;
-    const card = element('div', `cv-project-card${current ? ' current' : ''}`);
+    const selected = project.root === selectedCvProjectRoot;
+    const card = element('div', `cv-project-card${current ? ' current' : ''}${selected ? ' selected' : ''}`);
     card.setAttribute('role', 'listitem');
     const open = element('button', 'cv-project-open');
     open.type = 'button';
-    open.disabled = current;
-    open.setAttribute('aria-label', current ? `当前 CV：${project.name}` : `切换到 CV：${project.name}`);
+    open.setAttribute('aria-pressed', String(selected));
+    open.setAttribute('aria-label', current ? `选择当前 CV：${project.name}` : `选择 CV：${project.name}`);
     const copy = element('span', 'cv-project-copy');
     copy.append(element('strong', '', project.name), element('small', '', project.root));
-    open.append(element('span', 'cv-project-mark', current ? '●' : '○'), copy, element('span', 'cv-project-entry', project.entry || 'resume.tex'));
-    open.addEventListener('click', () => switchCvProject(project));
+    open.append(element('span', 'cv-project-mark', selected ? '✓' : (current ? '●' : '○')), copy, element('span', 'cv-project-entry', project.entry || 'resume.tex'));
+    open.addEventListener('click', () => {
+      selectedCvProjectRoot = project.root;
+      renderCvLibrary();
+      cvLibraryOpenEditor.focus();
+    });
     const remove = element('button', 'cv-project-remove', '×');
     remove.type = 'button';
     remove.disabled = current;
@@ -429,6 +489,7 @@ function renderCvLibrary() {
     remove.title = current ? '当前 CV 不能从列表移除' : '仅从列表移除，不删除磁盘文件';
     remove.addEventListener('click', () => {
       cvLibrary = cvLibrary.filter((item) => item.root !== project.root);
+      if (selectedCvProjectRoot === project.root) selectedCvProjectRoot = '';
       persistCvLibrary();
       renderCvLibrary();
     });
@@ -445,16 +506,32 @@ async function prepareProjectSwitch() {
 
 async function switchCvProject(project) {
   const root = project?.root;
-  if (!root || root === currentProjectRoot || !await prepareProjectSwitch()) return;
+  if (!root) return false;
+  if (root === currentProjectRoot) return true;
+  if (!await prepareProjectSwitch()) return false;
   try {
     await openProjectFolder(root, project.entry);
-    cvLibraryDialog.close();
+    return true;
   } catch (error) {
     showError('无法切换 CV', error.message);
+    return false;
   }
 }
 
+async function openSelectedCvInEditor() {
+  const project = cvLibrary.find((item) => item.root === selectedCvProjectRoot);
+  if (!project) return;
+  cvLibraryOpenEditor.disabled = true;
+  if (!await switchCvProject(project)) {
+    renderCvLibrary();
+    return;
+  }
+  cvLibraryDialog.close();
+  await switchView('editor-view');
+}
+
 function openCvLibrary() {
+  selectedCvProjectRoot = '';
   renderCvLibrary();
   cvLibraryDialog.showModal();
   window.setTimeout(() => cvLibraryDialog.querySelector('button:not(:disabled)')?.focus(), 60);
@@ -618,6 +695,7 @@ function renderIntakeAttachments() {
 
 function resetIntakeReview(clearInput = true) {
   intakeSegments = [];
+  intakeAnalyzedSource = null;
   intakeReviewList.replaceChildren();
   intakeReviewEmpty.hidden = false;
   intakeReviewActions.hidden = true;
@@ -630,10 +708,21 @@ function resetIntakeReview(clearInput = true) {
   }
 }
 
+function intakeReviewAttachments() {
+  return intakeAnalyzedSource?.attachments || intakeAttachments;
+}
+
+function intakePhotoAttachmentIndexes(item = {}) {
+  const attachments = intakeReviewAttachments();
+  return (Array.isArray(item.attachmentIndexes) ? item.attachmentIndexes : [])
+    .filter((index) => /^image\/(?:png|jpeg)$/.test(attachments[index]?.mimeType || ''));
+}
+
 function hasExtractedIntakeContent(item = {}) {
   if (typeof item.content === 'string' && item.content.trim()) return true;
   const fields = item.fields || {};
   if (Object.values(fields.profile || {}).some((value) => typeof value === 'string' && value.trim())) return true;
+  if (fields.profile?.isPhoto === true && intakePhotoAttachmentIndexes(item).length) return true;
   if (['experiences', 'education', 'projects', 'skills'].some((key) => Array.isArray(fields[key]) && fields[key].length)) return true;
   if (item.kind === 'job') {
     return Object.values(fields.job || {}).some((value) => Array.isArray(value) ? value.length : typeof value === 'string' && value.trim());
@@ -788,6 +877,7 @@ function renderIntakeReview() {
     }));
     kind.addEventListener('change', () => {
       segment.kind = kind.value;
+      if (segment.kind !== 'personal' && segment.fields?.profile) segment.fields.profile.isPhoto = false;
       renderIntakeReview();
     });
     const category = segment.kind === 'personal'
@@ -817,7 +907,29 @@ function renderIntakeReview() {
     summary.setAttribute('aria-label', `第 ${index + 1} 条材料摘要`);
     summary.addEventListener('input', () => { segment.summary = summary.value; });
     const structured = renderStructuredMaterial(segment);
-    const warning = element('p', 'intake-extraction-warning', '这个来源还没有可复用的提取内容，不能直接把原始图片或 PDF 当作知识入库。请启用视觉模型重新分析、在下方补写可靠的转录/描述，或移除此条。');
+    const photoAttachmentIndexes = segment.kind === 'personal' ? intakePhotoAttachmentIndexes(segment) : [];
+    const photoControl = photoAttachmentIndexes.length ? element('label', 'intake-photo-control') : null;
+    if (photoControl) {
+      const attachment = intakeReviewAttachments()[photoAttachmentIndexes[0]];
+      const preview = document.createElement('img');
+      preview.src = attachment.dataUrl;
+      preview.alt = '';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = segment.fields?.profile?.isPhoto === true;
+      checkbox.setAttribute('aria-label', `将第 ${index + 1} 条材料的图片设为个人照片`);
+      const copy = element('span', '');
+      copy.append(element('strong', '', '设为个人照片'), element('small', '', '仅用于明确的本人头像；截图、证书和作品图请勿勾选'));
+      checkbox.addEventListener('change', () => {
+        segment.fields ||= {};
+        segment.fields.profile ||= {};
+        segment.fields.profile.isPhoto = checkbox.checked;
+        if (checkbox.checked && !segment.title?.trim()) segment.title = '个人照片';
+        updateIntakeSegmentExtractionState(segment, card, confidence, warning);
+      });
+      photoControl.append(preview, checkbox, copy);
+    }
+    const warning = element('p', 'intake-extraction-warning', '这个来源还没有可复用内容。请启用视觉模型、补写可靠文字；如果它确实是本人头像，也可以明确勾选“设为个人照片”。');
     const content = document.createElement('textarea');
     content.className = 'intake-review-content';
     content.rows = 5;
@@ -832,6 +944,7 @@ function renderIntakeReview() {
       ? element('small', 'intake-segment-assets', `关联 ${segment.attachmentIndexes.length} 个原始附件`)
       : null;
     card.append(heading, title);
+    if (photoControl) card.append(photoControl);
     if (structured) card.append(structured);
     card.append(summary, warning, content);
     if (attachmentNote) card.append(attachmentNote);
@@ -850,17 +963,26 @@ async function analyzeIntake() {
   const button = document.querySelector('#intake-analyze');
   button.disabled = true;
   intakeReviewStatus.textContent = 'Agent 正在识别…';
+  const analysisAttachments = intakeAttachments.map(({ name, mimeType, dataUrl, text: extractedText, previewImages }) => ({
+    name, mimeType, dataUrl, text: extractedText, previewImages,
+  }));
+  const analysisSource = {
+    text,
+    html: intakeRawHtml,
+    attachments: analysisAttachments.map(({ name, mimeType, dataUrl, text: extractedText }) => ({ name, mimeType, dataUrl, text: extractedText })),
+  };
   try {
     const result = await request('/api/intake/classify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
-        attachments: intakeAttachments.map(({ name, mimeType, dataUrl, text: extractedText, previewImages }) => ({ name, mimeType, dataUrl, text: extractedText, previewImages })),
+        attachments: analysisAttachments,
         provider: agentSettings(),
       }),
     });
     intakeSegments = Array.isArray(result.segments) ? result.segments : [];
+    intakeAnalyzedSource = analysisSource;
     intakeReviewStatus.textContent = result.mode === 'agent'
       ? `${result.model || result.provider} · ${intakeSegments.length} 条`
       : `本地初分 · ${intakeSegments.length} 条`;
@@ -883,14 +1005,17 @@ async function commitIntake() {
   }
   const button = document.querySelector('#intake-commit');
   button.disabled = true;
+  const source = intakeAnalyzedSource || {
+    text: intakeBox.value.trim(),
+    html: intakeRawHtml,
+    attachments: intakeAttachments.map(({ name, mimeType, dataUrl, text }) => ({ name, mimeType, dataUrl, text })),
+  };
   try {
     const result = await request('/api/intake/commit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: intakeBox.value.trim(),
-        html: intakeRawHtml,
-        attachments: intakeAttachments.map(({ name, dataUrl, text }) => ({ name, dataUrl, text })),
+        ...source,
         segments: intakeSegments,
       }),
     });
@@ -908,45 +1033,44 @@ async function commitIntake() {
 }
 
 const PERSONAL_CATEGORY_META = {
-  profile: ['个人简介', 0],
-  contact: ['联系方式', 1],
-  summary: ['个人简介', 0],
-  experience: ['工作经历', 2],
-  project: ['项目经历', 3],
-  education: ['教育经历', 4],
-  skill: ['专业技能', 5],
-  award: ['荣誉和奖项', 6],
-  extracurricular: ['课外活动', 7],
-  social_practice: ['社会实践', 8],
+  profile: ['个人信息', 0],
+  experience: ['工作经历', 1],
+  project: ['项目经历', 2],
+  education: ['教育经历', 3],
+  skill: ['专业技能', 4],
+  award: ['荣誉和奖项', 5],
+  extracurricular: ['课外活动', 6],
+  social_practice: ['社会实践', 7],
+  talk: ['演讲和讲座', 8],
   publication: ['论文发表', 9],
-  talk: ['演讲和讲座', 10],
-  photo: ['个人照片', 11],
-  other: ['其他个人信息', 12],
+};
+
+const LEGACY_PERSONAL_CATEGORY_ALIASES = {
+  contact: 'profile',
+  summary: 'profile',
+  photo: 'profile',
+  other: 'profile',
 };
 
 function materialPersonalCategory(item) {
   const fields = item?.fields || {};
   const explicit = fields.personal?.category;
-  if (explicit && explicit !== 'other') return explicit;
+  if (PERSONAL_CATEGORY_META[explicit]) return explicit;
   if (Object.values(fields.profile || {}).some(Boolean)) return 'profile';
   if (fields.experiences?.length) return 'experience';
   if (fields.projects?.length) return 'project';
   if (fields.education?.length) return 'education';
   if (fields.skills?.length) return 'skill';
-  return 'other';
+  return LEGACY_PERSONAL_CATEGORY_ALIASES[explicit] || 'profile';
 }
 
 function materialKindLabel(item) {
-  return item.kind === 'job' ? '职位描述' : (PERSONAL_CATEGORY_META[materialPersonalCategory(item)] || PERSONAL_CATEGORY_META.other)[0];
+  return item.kind === 'job' ? '职位描述' : PERSONAL_CATEGORY_META[materialPersonalCategory(item)][0];
 }
 
 function materialPriority(item) {
   if (item.kind === 'job') return 50;
-  return (PERSONAL_CATEGORY_META[materialPersonalCategory(item)] || PERSONAL_CATEGORY_META.other)[1];
-}
-
-function materialStatusLabel(item) {
-  return item.status === 'archived' ? '已归档' : item.extractionStatus === 'unreadable' ? '待完善' : '可使用';
+  return PERSONAL_CATEGORY_META[materialPersonalCategory(item)][1];
 }
 
 function materialRecordedDate(item) {
@@ -955,35 +1079,173 @@ function materialRecordedDate(item) {
   return Number.isNaN(date.getTime()) ? '日期未知' : date.toLocaleDateString('zh-CN');
 }
 
-function createMaterialCard(item) {
+function materialSearchValues(value) {
+  if (typeof value === 'string' || typeof value === 'number') return [String(value)];
+  if (Array.isArray(value)) return value.flatMap(materialSearchValues);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(materialSearchValues);
+  return [];
+}
+
+function materialMatchesCurrentQuery(item) {
+  if (materialBankCategoryFilter !== 'all') {
+    if (materialBankCategoryFilter === 'job') {
+      if (item.kind !== 'job') return false;
+    } else if (item.kind !== 'personal' || materialPersonalCategory(item) !== materialBankCategoryFilter) return false;
+  }
+  const terms = materialBankSearchQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const corpus = [
+    item.title,
+    item.summary,
+    item.content,
+    materialKindLabel(item),
+    materialRecordedDate(item),
+    ...materialSearchValues(item.fields),
+  ].filter(Boolean).join('\n').toLocaleLowerCase();
+  return terms.every((term) => corpus.includes(term));
+}
+
+function sortedMaterialBankItems() {
+  return [...(Array.isArray(intakeBank.items) ? intakeBank.items : [])]
+    .sort((left, right) => materialPriority(left) - materialPriority(right)
+      || String(right.recordedAt || right.createdAt || '').localeCompare(String(left.recordedAt || left.createdAt || '')));
+}
+
+function currentMaterialBankResults() {
+  return sortedMaterialBankItems().filter(materialMatchesCurrentQuery);
+}
+
+function setMaterialSelected(itemId, selected) {
+  if (selected) selectedMaterialIds.add(itemId);
+  else selectedMaterialIds.delete(itemId);
+  document.querySelectorAll('.material-card[data-material-id]').forEach((card) => {
+    if (card.dataset.materialId !== itemId) return;
+    card.classList.toggle('selected', selected);
+    const checkbox = card.querySelector('.material-card-checkbox');
+    if (checkbox) checkbox.checked = selected;
+  });
+  syncMaterialBankSelectionControls();
+}
+
+function syncMaterialBankSelectionControls() {
+  const items = Array.isArray(intakeBank.items) ? intakeBank.items : [];
+  const validIds = new Set(items.map((item) => item.id));
+  selectedMaterialIds = new Set([...selectedMaterialIds].filter((id) => validIds.has(id)));
+  const results = currentMaterialBankResults();
+  const selectedItems = items.filter((item) => selectedMaterialIds.has(item.id));
+  const selectedPersonalCount = selectedItems.filter((item) => item.kind === 'personal').length;
+  materialBankSelectionStatus.textContent = `当前 ${results.length} 条 · 已选 ${selectedItems.length} 条（个人信息 ${selectedPersonalCount} 条）`;
+  materialBankSelectAll.disabled = !results.length || results.every((item) => selectedMaterialIds.has(item.id));
+  materialBankInvertSelection.disabled = !results.length;
+  materialBankClearSelection.disabled = !selectedItems.length;
+  materialBankDeleteSelected.disabled = !selectedItems.length;
+  const generateButton = document.querySelector('#intake-generate-cv');
+  generateButton.disabled = !selectedPersonalCount;
+  generateButton.title = selectedPersonalCount ? `使用已选的 ${selectedPersonalCount} 条个人信息生成 CV` : '请先选择至少一条个人信息';
+}
+
+function materialPlainText(item) {
+  if (item.content?.trim()) return item.content.trim();
+  const fields = item.fields || {};
+  if (item.kind === 'job') {
+    const job = fields.job || {};
+    return [
+      [job.title, job.company, job.location, job.employmentType].filter(Boolean).join(' · '),
+      job.description,
+      ...(job.requirements || []),
+      ...(job.keywords || []),
+    ].filter(Boolean).join('\n').trim() || '暂无可复制的用户原文';
+  }
+  if (fields.personal?.details?.trim()) return fields.personal.details.trim();
+  const profile = fields.profile || {};
+  if (profile.isPhoto === true) return '个人照片';
+  const profileText = [profile.name, profile.headline, profile.email, profile.phone, profile.location, profile.website,
+    profile.linkedin, profile.github, profile.summary].filter(Boolean).join('\n');
+  if (profileText) return profileText;
+  const recordText = [
+    ...(fields.experiences || []).flatMap((record) => [[record.dates, record.role, record.organization, record.location].filter(Boolean).join(' · '), ...(record.bullets || [])]),
+    ...(fields.projects || []).flatMap((record) => [[record.dates, record.name, record.role, record.url].filter(Boolean).join(' · '), ...(record.bullets || [])]),
+    ...(fields.education || []).flatMap((record) => [[record.dates, record.degree, record.institution, record.location].filter(Boolean).join(' · '), ...(record.details || [])]),
+    ...(fields.skills || []).map((record) => [record.category, ...(record.items || [])].filter(Boolean).join(' · ')),
+  ].filter(Boolean).join('\n');
+  return recordText || '暂无可复制的用户原文';
+}
+
+function isMaterialCardExpanded(itemId) {
+  return intakeBankDensity === 'detailed' ? !collapsedMaterialIds.has(itemId) : expandedMaterialIds.has(itemId);
+}
+
+function applyMaterialCardExpansion(card, expanded) {
+  const toggle = card.querySelector('.material-card-toggle');
+  const details = card.querySelector('.material-card-details');
+  const label = card.querySelector('.material-card-expansion-label');
+  card.classList.toggle('expanded', expanded);
+  card.classList.toggle('collapsed', !expanded);
+  toggle.setAttribute('aria-expanded', String(expanded));
+  details.hidden = false;
+  details.setAttribute('aria-hidden', String(!expanded));
+  details.inert = !expanded;
+  label.textContent = expanded ? '收起' : '展开';
+}
+
+function toggleMaterialCard(itemId) {
+  const expanded = !isMaterialCardExpanded(itemId);
+  if (intakeBankDensity === 'detailed') {
+    if (expanded) collapsedMaterialIds.delete(itemId);
+    else collapsedMaterialIds.add(itemId);
+  } else if (expanded) expandedMaterialIds.add(itemId);
+  else expandedMaterialIds.delete(itemId);
+  document.querySelectorAll('.material-card[data-material-id]').forEach((card) => {
+    if (card.dataset.materialId === itemId) applyMaterialCardExpansion(card, expanded);
+  });
+}
+
+function createMaterialCard(item, listKind) {
+  const expanded = isMaterialCardExpanded(item.id);
+  const selected = selectedMaterialIds.has(item.id);
   const category = item.kind === 'job' ? 'job' : materialPersonalCategory(item);
-  const card = element('article', `material-card kind-${item.kind} category-${category}`);
+  const card = element('article', `material-card ${expanded ? 'expanded' : 'collapsed'} ${selected ? 'selected' : ''} kind-${item.kind} category-${category}`);
   card.setAttribute('role', 'listitem');
-  const body = element('div', 'material-card-body');
+  card.dataset.materialId = item.id;
+  const detailsId = `material-details-${listKind}-${String(item.id).replace(/[^a-z0-9_-]/gi, '-')}`;
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'material-card-checkbox';
+  checkbox.checked = selected;
+  checkbox.setAttribute('aria-label', `选择 ${item.title || materialKindLabel(item)}`);
+  checkbox.addEventListener('change', () => setMaterialSelected(item.id, checkbox.checked));
+  const toggle = element('button', 'material-card-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-controls', detailsId);
   const meta = element('div', 'material-card-meta');
   meta.append(element('span', 'material-kind', materialKindLabel(item)));
-  const lifecycle = element('div', 'material-card-lifecycle');
-  const status = element('span', `material-status status-${item.status || 'active'}`, `状态 · ${materialStatusLabel(item)}`);
-  const recorded = element('time', 'material-recorded-at', `录入日期 ${materialRecordedDate(item)}`);
-  recorded.dateTime = item.recordedAt || item.createdAt || '';
-  lifecycle.append(status, recorded);
-  const title = element('strong', '', item.title || materialKindLabel(item));
-  const structured = renderStructuredMaterial(item, true);
-  const summary = element('p', 'material-card-summary', item.summary || item.content || '已提取为可复用内容');
-  body.append(meta, title, lifecycle);
-  if (structured) body.append(structured);
-  else body.append(summary);
-  const sourceEvidence = element('div', 'material-source-evidence');
-  const imageAsset = item.assets?.find((asset) => asset.mimeType?.startsWith('image/'));
-  if (imageAsset) {
+  const photoAsset = item.fields?.profile?.isPhoto === true
+    ? (item.assets || []).find((asset) => /^image\/(?:png|jpeg)$/.test(asset.mimeType || ''))
+    : null;
+  if (photoAsset) {
     const thumbnail = document.createElement('img');
-    thumbnail.className = 'material-card-thumbnail';
-    thumbnail.src = imageAsset.url;
-    thumbnail.alt = `${item.title} 的来源附件预览`;
-    sourceEvidence.append(thumbnail);
+    thumbnail.className = 'material-photo-thumbnail';
+    thumbnail.src = photoAsset.url;
+    thumbnail.alt = '个人照片缩略图';
+    meta.prepend(thumbnail);
   }
-  sourceEvidence.append(element('small', '', `已提取${item.assets?.length ? ` · ${item.assets.length} 个来源附件` : ' · 无附件来源'}`));
-  body.append(sourceEvidence);
+  const lifecycle = element('div', 'material-card-lifecycle');
+  const recorded = element('time', 'material-recorded-at', materialRecordedDate(item));
+  recorded.dateTime = item.recordedAt || item.createdAt || '';
+  recorded.title = `录入日期 ${materialRecordedDate(item)}`;
+  recorded.setAttribute('aria-label', recorded.title);
+  lifecycle.append(recorded);
+  const title = element('strong', 'material-card-title', item.title || materialKindLabel(item));
+  const expansionLabel = element('span', 'material-card-expansion-label', expanded ? '收起' : '展开');
+  toggle.append(meta, title, lifecycle, expansionLabel);
+  toggle.addEventListener('click', () => toggleMaterialCard(item.id));
+
+  const details = element('div', 'material-card-details');
+  details.id = detailsId;
+  const detailsInner = element('div', 'material-card-details-inner');
+  detailsInner.append(element('p', 'material-card-text', materialPlainText(item)));
+  details.append(detailsInner);
+
   const remove = element('button', 'material-card-remove', '×');
   remove.type = 'button';
   remove.title = '从信息银行移除';
@@ -992,14 +1254,122 @@ function createMaterialCard(item) {
     if (!window.confirm(`从信息银行移除“${item.title}”？原始提交和附件仍保留在本机归档中。`)) return;
     try {
       const result = await request(`/api/intake/items/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+      selectedMaterialIds.delete(item.id);
+      expandedMaterialIds.delete(item.id);
+      collapsedMaterialIds.delete(item.id);
       intakeBank = result.bank;
       renderMaterialBank();
     } catch (error) {
       showError('无法移除信息', error.message);
     }
   });
-  card.append(body, remove);
+  card.append(checkbox, toggle, remove, details);
+  applyMaterialCardExpansion(card, expanded);
   return card;
+}
+
+function selectMaterialBankDensity(density, persist = true) {
+  intakeBankDensity = density === 'detailed' ? 'detailed' : 'compact';
+  expandedMaterialIds = new Set();
+  collapsedMaterialIds = new Set();
+  if (persist) localStorage.setItem('cv-studio-material-bank-density', intakeBankDensity);
+  renderMaterialBank();
+}
+
+function syncMaterialBankControls() {
+  materialBankColumns.dataset.density = intakeBankDensity;
+  materialBankPageSize.value = String(intakeBankPageSize);
+  materialBankDensity.querySelectorAll('button[data-density]').forEach((button) => {
+    const active = button.dataset.density === intakeBankDensity;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function renderMaterialBankPagination(kind, totalItems) {
+  const pagination = materialBankPagination[kind];
+  const totalPages = Math.max(1, Math.ceil(totalItems / intakeBankPageSize));
+  intakeBankPages[kind] = Math.min(Math.max(1, intakeBankPages[kind] || 1), totalPages);
+  const previous = pagination.querySelector('[data-page-action="previous"]');
+  const next = pagination.querySelector('[data-page-action="next"]');
+  previous.disabled = intakeBankPages[kind] <= 1;
+  next.disabled = intakeBankPages[kind] >= totalPages;
+  pagination.querySelector('span').textContent = `第 ${intakeBankPages[kind]} / ${totalPages} 页 · ${totalItems} 条`;
+  pagination.hidden = totalPages <= 1;
+}
+
+function selectMaterialBankPage(kind, page) {
+  if (!materialBankLists[kind]) return;
+  intakeBankPages[kind] = Math.max(1, Number(page) || 1);
+  renderMaterialBank();
+}
+
+function selectMaterialBankPageSize(value) {
+  const nextSize = Number(value);
+  intakeBankPageSize = [5, 10, 20, 50].includes(nextSize) ? nextSize : 10;
+  intakeBankPages = { job: 1, personal: 1 };
+  localStorage.setItem('cv-studio-material-bank-page-size', String(intakeBankPageSize));
+  renderMaterialBank();
+}
+
+function updateMaterialBankFilters() {
+  materialBankSearchQuery = materialBankSearch.value;
+  materialBankCategoryFilter = materialBankCategory.value;
+  intakeBankPages = { job: 1, personal: 1 };
+  if (materialBankCategoryFilter === 'job') intakeBankKind = 'job';
+  else if (materialBankCategoryFilter !== 'all') intakeBankKind = 'personal';
+  else {
+    const results = currentMaterialBankResults();
+    const activeHasResults = results.some((item) => item.kind === intakeBankKind);
+    const otherKind = intakeBankKind === 'job' ? 'personal' : 'job';
+    if (!activeHasResults && results.some((item) => item.kind === otherKind)) intakeBankKind = otherKind;
+  }
+  renderMaterialBank();
+}
+
+function selectAllMaterialBankResults() {
+  currentMaterialBankResults().forEach((item) => selectedMaterialIds.add(item.id));
+  renderMaterialBank();
+}
+
+function invertMaterialBankResults() {
+  currentMaterialBankResults().forEach((item) => {
+    if (selectedMaterialIds.has(item.id)) selectedMaterialIds.delete(item.id);
+    else selectedMaterialIds.add(item.id);
+  });
+  renderMaterialBank();
+}
+
+function clearMaterialBankSelection() {
+  selectedMaterialIds.clear();
+  renderMaterialBank();
+}
+
+async function deleteSelectedMaterialBankItems() {
+  const itemIds = [...selectedMaterialIds];
+  if (!itemIds.length) return;
+  if (!window.confirm(`确定批量删除已选的 ${itemIds.length} 条信息吗？原始提交和附件仍保留在本机归档中。`)) return;
+  materialBankDeleteSelected.disabled = true;
+  try {
+    const result = await request('/api/intake/items/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIds }),
+    });
+    itemIds.forEach((itemId) => {
+      selectedMaterialIds.delete(itemId);
+      expandedMaterialIds.delete(itemId);
+      collapsedMaterialIds.delete(itemId);
+    });
+    intakeBank = result.bank;
+    renderMaterialBank();
+  } catch (error) {
+    syncMaterialBankSelectionControls();
+    const details = error.status === 404 && !error.responseWasJson
+      ? '当前页面已经更新，但后台仍是旧版本。请完全退出并重新启动 CV Studio，再执行批量删除；本次请求没有删除任何信息。'
+      : error.message;
+    showError('无法批量删除信息', details);
+  }
 }
 
 function activateMaterialBankColumn(kind, shouldAnimate = true) {
@@ -1030,6 +1400,7 @@ function activateMaterialBankColumn(kind, shouldAnimate = true) {
     const content = column.querySelector('.material-bank-column-content');
     column.classList.toggle('active', active);
     header.setAttribute('aria-expanded', String(active));
+    content.hidden = !active;
     content.setAttribute('aria-hidden', String(!active));
     content.inert = !active;
     if (active && shouldAnimate && !canStretch) animateElement(content, { opacity: [.25, 1] }, { duration: .26 });
@@ -1064,24 +1435,34 @@ function activateMaterialBankColumn(kind, shouldAnimate = true) {
 
 function renderMaterialBank() {
   const items = Array.isArray(intakeBank.items) ? intakeBank.items : [];
-  const counts = intakeBank.counts || { job: 0, personal: 0 };
-  document.querySelector('#bank-count-all').textContent = String(items.length);
-  document.querySelector('#bank-count-job').textContent = String(counts.job || 0);
-  document.querySelector('#bank-count-personal').textContent = String(counts.personal || 0);
+  syncMaterialBankSelectionControls();
+  const sorted = currentMaterialBankResults();
+  const filtering = Boolean(materialBankSearchQuery.trim()) || materialBankCategoryFilter !== 'all';
+  const totalCounts = {
+    job: items.filter((item) => item.kind === 'job').length,
+    personal: items.filter((item) => item.kind === 'personal').length,
+  };
+  const resultCounts = {
+    job: sorted.filter((item) => item.kind === 'job').length,
+    personal: sorted.filter((item) => item.kind === 'personal').length,
+  };
+  document.querySelector('#bank-count-job').textContent = filtering ? `${resultCounts.job}/${totalCounts.job}` : String(totalCounts.job);
+  document.querySelector('#bank-count-personal').textContent = filtering ? `${resultCounts.personal}/${totalCounts.personal}` : String(totalCounts.personal);
   document.querySelector('#intake-sidebar-count').textContent = `${items.length} 条已入库信息`;
-  document.querySelector('#intake-generate-cv').disabled = !Number(counts.personal);
-  const sorted = [...items].sort((left, right) => materialPriority(left) - materialPriority(right)
-    || String(right.recordedAt || right.createdAt || '').localeCompare(String(left.recordedAt || left.createdAt || '')));
+  syncMaterialBankControls();
   Object.entries(materialBankLists).forEach(([kind, list]) => {
     list.replaceChildren();
-    const visible = sorted.filter((item) => kind === 'all' || item.kind === kind);
+    const visible = sorted.filter((item) => item.kind === kind);
+    renderMaterialBankPagination(kind, visible.length);
     if (!visible.length) {
-      const message = kind === 'all' ? '信息银行还是空的。请先到收件箱录入第一批材料。'
+      const message = filtering
+        ? `没有符合当前搜索或类别筛选的${kind === 'job' ? '职位描述' : '个人信息'}。`
         : kind === 'job' ? '还没有职位描述。' : '还没有个人信息。请录入简历或个人材料进行解析。';
       list.append(element('p', 'material-bank-empty', message));
       return;
     }
-    visible.slice(0, 120).forEach((item) => list.append(createMaterialCard(item)));
+    const start = (intakeBankPages[kind] - 1) * intakeBankPageSize;
+    visible.slice(start, start + intakeBankPageSize).forEach((item) => list.append(createMaterialCard(item, kind)));
   });
   activateMaterialBankColumn(intakeBankKind, false);
 }
@@ -1095,47 +1476,164 @@ async function loadIntakeBank() {
   }
 }
 
+const CV_FIT_DESCRIPTIONS = {
+  strict: '全篇围绕已选职位组织；Agent 会优先复用职位语言并突出最匹配的事实，但不会把职位要求冒充成你的经历。',
+  focused: '明显强调匹配经历、成果和技能，同时保留少量完整职业背景。',
+  balanced: '兼顾职位相关性与完整履历，适合作为大多数定向投递的起点。',
+  light: '职位只影响内容顺序和少量措辞，整体仍保持通用表达。',
+  none: '职位描述不会发送给生成 Agent，也不会参与标题、排序或措辞。',
+};
+
+function updateIntakeGenerateFitDescription() {
+  const description = document.querySelector('#intake-generate-fit-description');
+  description.textContent = intakeGenerateFit.disabled
+    ? '本次没有选择职位描述，将生成完全不考虑职位的通用 CV。'
+    : CV_FIT_DESCRIPTIONS[intakeGenerateFit.value] || CV_FIT_DESCRIPTIONS.balanced;
+}
+
+function setIntakeGenerationBusy(isBusy) {
+  intakeGenerationActive = isBusy;
+  intakeGenerateForm.setAttribute('aria-busy', String(isBusy));
+  intakeGenerateSetup.hidden = isBusy;
+  intakeGenerateProgress.hidden = !isBusy;
+  const submit = document.querySelector('#intake-generate-submit');
+  const cancel = document.querySelector('#intake-generate-cancel');
+  submit.disabled = isBusy;
+  cancel.disabled = false;
+  cancel.textContent = isBusy ? '停止生成' : '取消';
+  submit.textContent = isBusy ? 'CV Agent 生成中…' : '创建新 CV 并打开';
+}
+
+function updateIntakeGenerationProgress(event = {}) {
+  const percent = Math.max(0, Math.min(100, Number(event.percent) || 0));
+  const progressbar = document.querySelector('#intake-generate-progressbar');
+  progressbar.setAttribute('aria-valuenow', String(percent));
+  progressbar.querySelector('span').style.width = `${percent}%`;
+  document.querySelector('#intake-generate-progress-percent').textContent = `${percent}%`;
+  document.querySelector('#intake-generate-progress-message').textContent = event.message || 'CV Agent 正在生成…';
+  const phaseLabels = {
+    validate: '核对选择', prepare: '整理素材', local: '本地生成', agent: 'CV Agent', compile: '编译验证', save: '保存项目', complete: '生成完成',
+  };
+  document.querySelector('#intake-generate-progress-step').textContent = event.step && event.maxSteps
+    ? `${phaseLabels[event.phase] || 'Agent'} · ${event.step} / ${event.maxSteps}`
+    : phaseLabels[event.phase] || '准备生成';
+}
+
+async function requestGenerationStream(payload, onProgress, signal) {
+  const response = await fetch('/api/intake/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    const rawBody = await response.text();
+    let message = rawBody.trim() || 'CV generation failed.';
+    try { message = JSON.parse(rawBody).error || message; } catch { /* Keep the plain-text server response. */ }
+    throw new Error(message);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalState = null;
+
+  function consumeLine(line) {
+    if (!line.trim()) return;
+    let event;
+    try { event = JSON.parse(line); } catch { throw new Error('生成进度返回了无效数据，请重试。'); }
+    if (event.type === 'progress') onProgress(event);
+    else if (event.type === 'complete') finalState = event.state;
+    else if (event.type === 'error') throw new Error(event.error || 'CV generation failed.');
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(consumeLine);
+    if (done) break;
+  }
+  consumeLine(buffer);
+  if (!finalState) throw new Error('生成已结束，但没有返回新的 CV 项目。');
+  return finalState;
+}
+
 function openIntakeGenerateDialog() {
-  const jobs = (intakeBank.items || []).filter((item) => item.kind === 'job');
-  const jobSelect = document.querySelector('#intake-generate-job');
-  const empty = document.createElement('option');
-  empty.value = '';
-  empty.textContent = '不指定职位';
-  jobSelect.replaceChildren(empty, ...jobs.map((job) => {
-    const option = document.createElement('option');
-    option.value = job.id;
-    option.textContent = [job.fields?.job?.title || job.title, job.fields?.job?.company].filter(Boolean).join(' · ');
-    return option;
+  const selectedItems = (intakeBank.items || []).filter((item) => selectedMaterialIds.has(item.id));
+  const personalItems = selectedItems.filter((item) => item.kind === 'personal');
+  const jobs = selectedItems.filter((item) => item.kind === 'job');
+  if (!personalItems.length) {
+    showError('请先选择 CV 内容', '请在信息银行中至少勾选一条个人信息、工作经历或项目经历。');
+    return;
+  }
+  intakeGenerationItemIds = selectedItems.map((item) => item.id);
+  document.querySelector('#intake-generate-summary-count').textContent = `${personalItems.length} 条个人信息 · ${jobs.length} 个职位`;
+  document.querySelector('#intake-generate-summary-items').replaceChildren(...selectedItems.map((item) => {
+    const label = item.kind === 'job'
+      ? `职位 · ${item.fields?.job?.title || item.title}`
+      : `${materialKindLabel(item)} · ${item.title}`;
+    return element('li', item.kind === 'job' ? 'job' : '', label);
   }));
-  const today = new Date().toISOString().slice(0, 10);
-  document.querySelector('#intake-generate-name').value = `generated-cv-${today}`;
-  document.querySelector('#intake-generate-parent').value = currentProjectRoot.replace(/[\\/][^\\/]+$/, '');
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const version = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  document.querySelector('#intake-generate-name').value = `generated-cv-${version}`;
+  const rememberedFit = localStorage.getItem('cv-studio-generation-fit');
+  intakeGenerateFit.disabled = !jobs.length;
+  intakeGenerateFit.value = jobs.length && Object.hasOwn(CV_FIT_DESCRIPTIONS, rememberedFit) ? rememberedFit : jobs.length ? 'balanced' : 'none';
+  const templateInputs = [...intakeGenerateTemplates.querySelectorAll('input[name="cv-template"]')];
+  const rememberedTemplate = localStorage.getItem('cv-studio-generation-template');
+  const selectedTemplate = templateInputs.find((input) => input.value === rememberedTemplate) || templateInputs[0];
+  if (selectedTemplate) selectedTemplate.checked = true;
+  updateIntakeGenerateFitDescription();
+  const errorNode = document.querySelector('#intake-generate-error');
+  errorNode.hidden = true;
+  errorNode.textContent = '';
+  updateIntakeGenerationProgress({ phase: 'validate', percent: 0, message: '正在核对已选信息…' });
+  setIntakeGenerationBusy(false);
   intakeGenerateDialog.showModal();
   window.setTimeout(() => document.querySelector('#intake-generate-name').select(), 60);
 }
 
 async function generateCvFromIntake(event) {
   event.preventDefault();
+  if (intakeGenerationActive) return;
+  const selectedItems = (intakeBank.items || []).filter((item) => intakeGenerationItemIds.includes(item.id));
+  if (!selectedItems.some((item) => item.kind === 'personal')) {
+    showError('请选择素材', '至少选择一条个人信息、工作经历或项目经历。');
+    return;
+  }
   if (!await prepareProjectSwitch()) return;
-  const submit = document.querySelector('#intake-generate-submit');
-  submit.disabled = true;
+  const errorNode = document.querySelector('#intake-generate-error');
+  errorNode.hidden = true;
+  errorNode.textContent = '';
+  const fitLevel = selectedItems.some((item) => item.kind === 'job') ? intakeGenerateFit.value : 'none';
+  const templateId = intakeGenerateTemplates.querySelector('input[name="cv-template"]:checked')?.value || 'classic';
+  localStorage.setItem('cv-studio-generation-fit', fitLevel);
+  localStorage.setItem('cv-studio-generation-template', templateId);
+  setIntakeGenerationBusy(true);
+  intakeGenerationAbortController = new AbortController();
+  updateIntakeGenerationProgress({ phase: 'validate', percent: 2, message: '正在启动 CV 生成流程…' });
   try {
-    const state = await request('/api/intake/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: document.querySelector('#intake-generate-name').value.trim(),
-        parentPath: document.querySelector('#intake-generate-parent').value.trim(),
-        jobId: document.querySelector('#intake-generate-job').value,
-      }),
-    });
+    const state = await requestGenerationStream({
+      name: document.querySelector('#intake-generate-name').value.trim(),
+      fitLevel,
+      templateId,
+      itemIds: [...intakeGenerationItemIds],
+      provider: agentSettings(),
+    }, updateIntakeGenerationProgress, intakeGenerationAbortController.signal);
     applyProjectState(state);
     intakeGenerateDialog.close();
     await switchView('editor-view');
   } catch (error) {
-    showError('无法生成 CV', error.message);
+    setIntakeGenerationBusy(false);
+    errorNode.textContent = error.name === 'AbortError' ? '已停止生成。你可以调整名称或职位贴合率后重试。' : error.message;
+    errorNode.hidden = false;
+    document.querySelector('#intake-generate-name').focus();
   } finally {
-    submit.disabled = false;
+    intakeGenerationAbortController = null;
+    if (!intakeGenerateDialog.open) setIntakeGenerationBusy(false);
   }
 }
 
@@ -1402,6 +1900,13 @@ function renderPdfAnnotations() {
   const context = pdfAnnotationCanvas.getContext('2d');
   context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
   context.clearRect(0, 0, rect.width, rect.height);
+  if (pdfInlineSelection) {
+    drawAnnotationPath(context, pdfInlineSelection, rect.width, rect.height, {
+      lineWidth: 2,
+      stroke: '#b94b29',
+      fill: 'rgb(213 91 50 / 14%)',
+    });
+  }
   const activeId = activeVisualContext?.annotationId;
   pdfAnnotations
     .filter((annotation) => annotation.page === pdfPage)
@@ -1415,6 +1920,22 @@ function renderPdfAnnotations() {
 
 function renderPdfAnnotationHits() {
   pdfAnnotationHits.replaceChildren();
+  if (pdfInlineEditActive) {
+    pdfTextItems.forEach((item, index) => {
+      if (!item.text.trim()) return;
+      const button = element('button', 'pdf-text-hit');
+      button.type = 'button';
+      button.style.left = `${item.x * 100}%`;
+      button.style.top = `${item.y * 100}%`;
+      button.style.width = `${Math.max(item.width, .008) * 100}%`;
+      button.style.height = `${Math.max(item.height, .012) * 100}%`;
+      button.setAttribute('aria-label', `编辑 PDF 文字：${item.text.trim().slice(0, 80)}`);
+      button.title = '直接修改这段文字';
+      button.addEventListener('click', () => openPdfInlineEditor(index));
+      pdfAnnotationHits.append(button);
+    });
+    return;
+  }
   pdfAnnotations.filter((annotation) => annotation.page === pdfPage).forEach((annotation, index) => {
     const button = element('button', 'pdf-annotation-hit');
     button.type = 'button';
@@ -1432,6 +1953,11 @@ function renderPdfAnnotationHits() {
 }
 
 function setPdfAnnotationDrawing(active) {
+  if (active && pdfInlineEditActive) {
+    pdfInlineEditActive = false;
+    document.body.classList.remove('pdf-inline-edit-mode');
+    closePdfInlineEditor({ clearContext: true });
+  }
   pdfAnnotationDrawing = Boolean(active && pdfReviewActive && pdfDocument);
   pdfPageShell.classList.toggle('is-drawing', pdfAnnotationDrawing);
   const button = document.querySelector('#pdf-draw-region');
@@ -1449,10 +1975,95 @@ function clearActiveVisualContext() {
   renderPdfAnnotations();
 }
 
+function closePdfInlineEditor({ clearContext = false } = {}) {
+  pdfInlineEditor.hidden = true;
+  pdfInlineSelection = null;
+  pdfInlineReplacement.value = '';
+  if (clearContext) clearActiveVisualContext();
+  else renderPdfAnnotations();
+}
+
+function inlineAnnotation(selection) {
+  const { x, y, width, height } = selection.bounds;
+  return {
+    page: pdfPage,
+    bounds: selection.bounds,
+    points: [
+      { x, y },
+      { x: x + width, y },
+      { x: x + width, y: y + height },
+      { x, y: y + height },
+      { x, y },
+    ],
+  };
+}
+
+function openPdfInlineEditor(itemIndex) {
+  const selection = textLineForPdfItem(pdfTextItems, itemIndex);
+  if (!selection) return;
+  const annotation = inlineAnnotation(selection);
+  pdfInlineSelection = { ...annotation, originalText: selection.text };
+  const imageDataUrl = createPdfRegionImage(annotation);
+  activeVisualContext = {
+    annotationId: null,
+    page: pdfPage,
+    bounds: selection.bounds,
+    label: 'PDF inline text selection',
+    selectedText: selection.text,
+    imageDataUrl,
+  };
+  agentContextThumbnail.src = imageDataUrl;
+  document.querySelector('#agent-context-label').textContent = `PDF 第 ${pdfPage} 页 · 原位编辑`;
+  document.querySelector('#agent-context-text').textContent = `已定位文字：${selection.text.slice(0, 80)}${selection.text.length > 80 ? '…' : ''}`;
+  agentVisualContext.hidden = false;
+  const shellWidth = pdfPageShell.clientWidth;
+  const shellHeight = pdfPageShell.clientHeight;
+  const editorWidth = Math.min(360, Math.max(260, shellWidth - 24));
+  const left = Math.min(Math.max(12, selection.bounds.x * shellWidth), Math.max(12, shellWidth - editorWidth - 12));
+  const preferredTop = (selection.bounds.y + selection.bounds.height) * shellHeight + 10;
+  const top = Math.min(Math.max(12, preferredTop), Math.max(12, shellHeight - 190));
+  pdfInlineEditor.style.left = `${left}px`;
+  pdfInlineEditor.style.top = `${top}px`;
+  pdfInlineEditor.style.width = `${editorWidth}px`;
+  pdfInlineEditor.hidden = false;
+  pdfInlineReplacement.value = selection.text;
+  renderPdfAnnotations();
+  pdfInlineReplacement.focus();
+  pdfInlineReplacement.select();
+}
+
+function submitPdfInlineEdit(event) {
+  event.preventDefault();
+  if (!pdfInlineSelection || !activeVisualContext) return;
+  if (agentSettings().type === 'local') {
+    showError('PDF 原位编辑需要模型 Agent', '请先在 AI Provider 中配置 OpenAI、Anthropic 或 Hermes。文字与局部图像只会在你提交这次编辑后发送。');
+    return;
+  }
+  const original = pdfInlineSelection.originalText;
+  const replacement = pdfInlineReplacement.value.trim();
+  if (replacement === original.trim()) {
+    closePdfInlineEditor();
+    return;
+  }
+  const message = [
+    '执行一次 PDF 原位编辑。请先用圈选文字和图像定位生成这段内容的真实 LaTeX 源码。',
+    `PDF 页码：${pdfPage}`,
+    `当前渲染文字：${JSON.stringify(original)}`,
+    `用户希望显示为：${JSON.stringify(replacement)}`,
+    '只修改产生这段渲染文字的必要源码，保留模板宏、列结构和其余内容；不要用 PDF 文字猜测文件路径。完成提案后必须临时编译验证。',
+  ].join('\n');
+  closePdfInlineEditor();
+  setAgentWindowState({ mode: 'floating', open: true });
+  agentInput.value = message;
+  document.querySelector('#agent-form').requestSubmit();
+}
+
 function resetPdfAnnotations() {
   pdfAnnotations = [];
   pdfAnnotationDraft = null;
   nextAnnotationId = 1;
+  pdfInlineSelection = null;
+  pdfInlineEditor.hidden = true;
   clearActiveVisualContext();
 }
 
@@ -1534,24 +2145,32 @@ function useCurrentPdfPage() {
   activatePdfAnnotation(annotation);
 }
 
-function enterPdfReviewMode() {
+function enterPdfReviewMode(mode = 'annotate') {
   if (!pdfDocument || pdfReviewActive) return;
   pdfReviewActive = true;
+  pdfInlineEditActive = mode === 'inline';
   pdfModeBeforeReview = pdfMode;
   document.body.classList.add('pdf-review-mode');
+  document.body.classList.toggle('pdf-inline-edit-mode', pdfInlineEditActive);
   previewPane.classList.add('pdf-review-active');
   document.documentElement.requestFullscreen?.().catch(() => {});
   pdfMode = 'page';
-  setPdfAnnotationDrawing(true);
+  setPdfAnnotationDrawing(!pdfInlineEditActive);
+  if (pdfInlineEditActive) {
+    document.querySelector('#pdf-review-guide').textContent = '点选 PDF 中的文字，直接改写后同步到真实 LaTeX 源码。';
+  }
   window.setTimeout(renderPdfPage, 80);
 }
 
 function exitPdfReviewMode(exitFullscreen = true) {
   if (!pdfReviewActive) return;
   pdfReviewActive = false;
+  pdfInlineEditActive = false;
   setPdfAnnotationDrawing(false);
   document.body.classList.remove('pdf-review-mode');
+  document.body.classList.remove('pdf-inline-edit-mode');
   previewPane.classList.remove('pdf-review-active');
+  closePdfInlineEditor({ clearContext: true });
   pdfMode = pdfModeBeforeReview;
   if (exitFullscreen && document.fullscreenElement) document.exitFullscreen().catch(() => {});
   window.setTimeout(renderPdfPage, 80);
@@ -1647,11 +2266,11 @@ async function renderPdfPage() {
 async function loadPdfPreview(url) {
   pdfLoading.hidden = false;
   pdfUrl = url;
+  const previousPage = pdfDocument ? pdfPage : 1;
   pdfRenderVersion += 1;
   pdfRenderTask?.cancel();
   if (pdfDocument) await pdfDocument.destroy();
   pdfDocument = null;
-  pdfPage = 1;
   pdfRotation = 0;
   pdfMode = 'width';
   resetPdfAnnotations();
@@ -1665,6 +2284,7 @@ async function loadPdfPreview(url) {
       iccUrl: '/pdfjs/iccs/',
     });
     pdfDocument = await loadingTask.promise;
+    pdfPage = Math.min(pdfDocument.numPages, Math.max(1, previousPage));
     preview.hidden = false;
     previewEmpty.hidden = true;
     await renderPdfPage();
@@ -1679,6 +2299,7 @@ async function loadPdfPreview(url) {
 
 function setPdfPage(nextPage) {
   if (!pdfDocument) return;
+  closePdfInlineEditor({ clearContext: true });
   pdfPage = Math.min(pdfDocument.numPages, Math.max(1, Number(nextPage) || 1));
   renderPdfPage();
 }
@@ -1704,8 +2325,10 @@ async function compile() {
     updateEditorState();
     compilerLabel.textContent = result.compiler;
     await loadPdfPreview(`/preview.pdf?entry=${encodeURIComponent(entryFile)}&t=${Date.now()}`);
+    return true;
   } catch (error) {
     showError(error.message, error.details);
+    return false;
   } finally {
     setBusy(false);
   }
@@ -2249,12 +2872,14 @@ function renderAgentEdits(messageNode, edits) {
     renderPatchLines(diff, edit.patch || {});
     const actions = element('div', 'agent-edit-actions');
     const dismiss = element('button', '', '忽略');
-    const apply = element('button', edit.operation === 'delete' ? 'delete' : 'apply', edit.operation === 'delete' ? '移至回收区' : '应用修改');
+    const apply = element('button', edit.operation === 'delete' ? 'delete' : 'apply', edit.operation === 'delete' ? '移至回收区' : '应用并更新 PDF');
     dismiss.type = 'button';
     apply.type = 'button';
     apply.setAttribute('aria-label', `${operationLabel}文件 ${edit.path}`);
     dismiss.addEventListener('click', () => proposal.remove());
-    apply.addEventListener('click', () => applyAgentEdits([edit], [proposal]));
+    apply.addEventListener('click', async () => {
+      if (await applyAgentEdits([edit], [proposal])) await compile();
+    });
     actions.append(dismiss, apply);
     proposal.append(heading, diff, actions);
     messageNode.append(proposal);
@@ -2298,7 +2923,9 @@ async function submitAgentMessage(event) {
     renderAgentTrace(pending, result.trace);
     const proposals = renderAgentEdits(pending, result.edits || []);
     const includesDelete = result.edits?.some((edit) => edit.operation === 'delete');
-    if (proposals.length && agentSettings().editMode === 'auto' && !includesDelete) await applyAgentEdits(result.edits, proposals);
+    if (proposals.length && agentSettings().editMode === 'auto' && !includesDelete) {
+      if (await applyAgentEdits(result.edits, proposals)) await compile();
+    }
     agentConversation.push({ role: 'user', content: message }, { role: 'assistant', content: result.response });
     saveAgentConversation();
   } catch (error) {
@@ -2325,6 +2952,7 @@ sidebarToggle.addEventListener('click', toggleSidebar);
 document.querySelector('#new-file-button').addEventListener('click', createProjectFile);
 document.querySelector('#cv-library-button').addEventListener('click', openCvLibrary);
 document.querySelector('#cv-library-close').addEventListener('click', () => cvLibraryDialog.close());
+cvLibraryOpenEditor.addEventListener('click', openSelectedCvInEditor);
 document.querySelector('#cv-library-import').addEventListener('click', () => {
   cvLibraryDialog.close();
   chooseAndOpenProjectFolder().catch((error) => showError('无法打开项目', error.message));
@@ -2373,17 +3001,34 @@ document.querySelector('#intake-reset').addEventListener('click', () => resetInt
 document.querySelectorAll('.material-bank-column-header').forEach((header) => header.addEventListener('click', () => {
   activateMaterialBankColumn(header.closest('.material-bank-column').dataset.kind);
 }));
+materialBankDensity.querySelectorAll('button[data-density]').forEach((button) => button.addEventListener('click', () => {
+  selectMaterialBankDensity(button.dataset.density);
+}));
+materialBankPageSize.addEventListener('change', () => selectMaterialBankPageSize(materialBankPageSize.value));
+materialBankSearch.addEventListener('input', updateMaterialBankFilters);
+materialBankCategory.addEventListener('change', updateMaterialBankFilters);
+materialBankSelectAll.addEventListener('click', selectAllMaterialBankResults);
+materialBankInvertSelection.addEventListener('click', invertMaterialBankResults);
+materialBankClearSelection.addEventListener('click', clearMaterialBankSelection);
+materialBankDeleteSelected.addEventListener('click', deleteSelectedMaterialBankItems);
+Object.entries(materialBankPagination).forEach(([kind, pagination]) => {
+  pagination.addEventListener('click', (event) => {
+    const action = event.target.closest('button[data-page-action]')?.dataset.pageAction;
+    if (!action) return;
+    const delta = action === 'previous' ? -1 : 1;
+    selectMaterialBankPage(kind, intakeBankPages[kind] + delta);
+  });
+});
 document.querySelector('#intake-generate-cv').addEventListener('click', openIntakeGenerateDialog);
 intakeGenerateForm.addEventListener('submit', generateCvFromIntake);
-document.querySelector('#intake-generate-cancel').addEventListener('click', () => intakeGenerateDialog.close());
-document.querySelector('#intake-generate-browse').addEventListener('click', async () => {
-  if (!window.cvStudioDesktop?.selectProjectFolder) {
-    document.querySelector('#intake-generate-parent').focus();
-    return;
-  }
-  const selectedPath = await window.cvStudioDesktop.selectProjectFolder();
-  if (selectedPath) document.querySelector('#intake-generate-parent').value = selectedPath;
+document.querySelector('#intake-generate-cancel').addEventListener('click', () => {
+  if (intakeGenerationActive) intakeGenerationAbortController?.abort();
+  else intakeGenerateDialog.close();
 });
+intakeGenerateDialog.addEventListener('cancel', (event) => {
+  if (intakeGenerationActive) event.preventDefault();
+});
+intakeGenerateFit.addEventListener('change', updateIntakeGenerateFitDescription);
 document.querySelectorAll('.pane-toggle').forEach((button) => button.addEventListener('click', () => setPanelHidden(button.dataset.panel, true)));
 initializeSplitter(document.querySelector('#vertical-splitter'), 'vertical');
 initializeSplitter(document.querySelector('#horizontal-splitter'), 'horizontal');
@@ -2431,11 +3076,17 @@ document.querySelector('#pdf-next-page').addEventListener('click', () => setPdfP
 document.querySelector('#pdf-zoom-out').addEventListener('click', () => changePdfZoom(1 / 1.15));
 document.querySelector('#pdf-zoom-in').addEventListener('click', () => changePdfZoom(1.15));
 document.querySelector('#pdf-review-button').addEventListener('click', enterPdfReviewMode);
+document.querySelector('#pdf-inline-edit-button').addEventListener('click', () => enterPdfReviewMode('inline'));
 document.querySelector('#pdf-exit-review').addEventListener('click', () => exitPdfReviewMode());
 document.querySelector('#pdf-draw-region').addEventListener('click', () => setPdfAnnotationDrawing(!pdfAnnotationDrawing));
 document.querySelector('#pdf-use-page').addEventListener('click', useCurrentPdfPage);
 document.querySelector('#pdf-clear-regions').addEventListener('click', resetPdfAnnotations);
-document.querySelector('#agent-clear-context').addEventListener('click', clearActiveVisualContext);
+document.querySelector('#agent-clear-context').addEventListener('click', () => {
+  if (pdfInlineSelection) closePdfInlineEditor({ clearContext: true });
+  else clearActiveVisualContext();
+});
+pdfInlineEditor.addEventListener('submit', submitPdfInlineEdit);
+document.querySelector('#pdf-inline-cancel').addEventListener('click', () => closePdfInlineEditor({ clearContext: true }));
 pdfAnnotationCanvas.addEventListener('pointerdown', startPdfAnnotation);
 pdfAnnotationCanvas.addEventListener('pointermove', continuePdfAnnotation);
 pdfAnnotationCanvas.addEventListener('pointerup', finishPdfAnnotation);
@@ -2538,6 +3189,9 @@ async function initialize() {
   setTheme(localStorage.getItem('cv-studio-theme') || 'light');
   setSidebarCollapsed(localStorage.getItem('cv-studio-sidebar-collapsed') === 'true');
   setZenMode(localStorage.getItem('cv-studio-zen-mode') === 'true');
+  intakeBankDensity = localStorage.getItem('cv-studio-material-bank-density') === 'detailed' ? 'detailed' : 'compact';
+  const savedMaterialBankPageSize = Number(localStorage.getItem('cv-studio-material-bank-page-size'));
+  intakeBankPageSize = [5, 10, 20, 50].includes(savedMaterialBankPageSize) ? savedMaterialBankPageSize : 10;
   initializePanelState();
   initializeAgentWindow();
   initializeAgentDragging();

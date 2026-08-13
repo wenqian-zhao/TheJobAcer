@@ -145,6 +145,7 @@
                       <option value="custom" hidden>自定义</option>
                     </select>
                     <span class="pdf-toolbar-spacer"></span>
+                    <button id="pdf-inline-edit-button" class="pdf-tool-button pdf-inline-launch" type="button" aria-label="直接编辑 PDF 中的文字并同步到 LaTeX" title="点选 PDF 文字并同步到 LaTeX"><i data-lucide="square-pen"></i><span>原位编辑</span></button>
                     <button id="pdf-review-button" class="pdf-tool-button pdf-review-launch" type="button" aria-label="进入 PDF 交互圈选模式" title="进入 PDF 交互圈选模式"><i data-lucide="scan-line"></i><span>圈选问 Agent</span></button>
                     <button id="pdf-draw-region" class="pdf-tool-button pdf-review-only" type="button" aria-pressed="false" aria-label="在 PDF 上圈选区域" title="在 PDF 上圈选区域"><i data-lucide="pencil"></i><span>圈选</span></button>
                     <button id="pdf-use-page" class="pdf-tool-button pdf-review-only" type="button" aria-label="把当前整页交给 Agent" title="键盘可用：把当前整页交给 Agent"><i data-lucide="image"></i><span>整页</span></button>
@@ -155,7 +156,7 @@
                   </div>
                   <div id="pdf-review-guide" class="pdf-review-guide pdf-review-only" role="status">点击“圈选”后在页面上画圈；再点圈选区域即可把图片与 PDF 文字交给 Agent。</div>
                   <div id="pdf-stage" class="pdf-stage" tabindex="0" aria-label="PDF 页面">
-                    <div id="pdf-page-shell" class="pdf-page-shell"><canvas id="pdf-canvas"></canvas><canvas id="pdf-annotation-canvas" aria-hidden="true"></canvas><div id="pdf-annotation-hits" class="pdf-annotation-hits" aria-label="PDF 圈选区域"></div></div>
+                    <div id="pdf-page-shell" class="pdf-page-shell"><canvas id="pdf-canvas"></canvas><canvas id="pdf-annotation-canvas" aria-hidden="true"></canvas><div id="pdf-annotation-hits" class="pdf-annotation-hits" aria-label="PDF 可交互区域"></div><form id="pdf-inline-editor" class="pdf-inline-editor" hidden><span class="pdf-inline-kicker">PDF → LATEX</span><label for="pdf-inline-replacement">直接修改这段文字</label><textarea id="pdf-inline-replacement" rows="3" aria-describedby="pdf-inline-help"></textarea><small id="pdf-inline-help">Agent 会定位真实源码；确认差异后自动编译并刷新 PDF。</small><div class="pdf-inline-actions"><button id="pdf-inline-cancel" type="button">取消</button><button class="apply" type="submit">同步到 LaTeX</button></div></form></div>
                     <div id="pdf-loading" class="pdf-loading" role="status" hidden>正在渲染 PDF…</div>
                   </div>
                 </div>
@@ -198,19 +199,33 @@
 
         <section id="bank-view" class="view tool-view bank-view" aria-label="信息银行" hidden>
           <section class="tool-panel material-bank-panel" aria-labelledby="material-bank-title">
-            <div class="material-bank-heading"><div><span class="eyebrow">LOCAL INFORMATION BANK</span><h2 id="material-bank-title">信息银行</h2><p>CV 会拆成独立的个人信息类目，不会整份入库。点击“全部 / 职位描述 / 个人信息”任一列可展开为主视图；每条记录保留状态和录入日期。</p></div><button id="intake-generate-cv" class="button primary" type="button"><i data-lucide="copy-plus"></i><span>生成新的简历</span></button></div>
-            <div id="material-bank-columns" class="material-bank-columns" data-active-kind="all" aria-label="信息银行三列视图">
-              <section class="material-bank-column active" data-kind="all">
-                <button class="material-bank-column-header" type="button" aria-expanded="true" aria-controls="bank-panel-all"><span class="material-bank-column-icon"><i data-lucide="list"></i></span><span class="material-bank-column-label"><strong>全部</strong><small>按重要程度汇总</small></span><span id="bank-count-all" class="material-bank-column-count">0</span></button>
-                <div id="bank-panel-all" class="material-bank-column-content"><div id="material-bank-list" class="material-bank-list" role="list" aria-label="全部已入库信息"></div></div>
-              </section>
+            <div class="material-bank-heading">
+              <div><span class="eyebrow">LOCAL INFORMATION BANK</span><h2 id="material-bank-title">信息银行</h2><p>在全部职位描述与个人信息中搜索、筛选和选择，再用所选内容生成 CV。</p></div>
+              <div class="material-bank-actions">
+                <label class="material-bank-page-size" for="material-bank-page-size">每页<select id="material-bank-page-size"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option><option value="50">50</option></select></label>
+                <div id="material-bank-density" class="material-bank-density" role="group" aria-label="信息展示密度"><button type="button" data-density="compact" aria-pressed="true">精简</button><button type="button" data-density="detailed" aria-pressed="false">详细</button></div>
+                <button id="intake-generate-cv" class="button primary" type="button" disabled><i data-lucide="copy-plus"></i><span>用已选内容生成 CV</span></button>
+              </div>
+            </div>
+            <div class="material-bank-toolbar" aria-label="搜索、筛选与批量操作">
+              <label class="material-bank-search" for="material-bank-search"><span>全局搜索</span><input id="material-bank-search" type="search" autocomplete="off" placeholder="搜索标题、原文或结构化信息，例如：抖音"></label>
+              <label class="material-bank-category" for="material-bank-category"><span>类别</span><select id="material-bank-category"><option value="all">全部类别</option><option value="job">职位描述</option><option value="profile">个人信息</option><option value="project">项目经历</option><option value="experience">工作经历</option><option value="award">荣誉和奖项</option><option value="education">教育经历</option><option value="skill">专业技能</option><option value="extracurricular">课外活动</option><option value="social_practice">社会实践</option><option value="talk">演讲和讲座</option><option value="publication">论文发表</option></select></label>
+              <div class="material-bank-selection-actions" role="group" aria-label="批量选择">
+                <button id="material-bank-select-all" type="button">全选结果</button>
+                <button id="material-bank-invert-selection" type="button">反选结果</button>
+                <button id="material-bank-clear-selection" type="button">清空选择</button>
+              </div>
+              <span id="material-bank-selection-status" class="material-bank-selection-status" aria-live="polite">当前 0 条 · 已选 0 条</span>
+              <button id="material-bank-delete-selected" class="button danger" type="button" disabled><i data-lucide="trash-2"></i><span>批量删除</span></button>
+            </div>
+            <div id="material-bank-columns" class="material-bank-columns" data-active-kind="personal" aria-label="信息银行分类视图">
               <section class="material-bank-column" data-kind="job">
                 <button class="material-bank-column-header" type="button" aria-expanded="false" aria-controls="bank-panel-job"><span class="material-bank-column-icon"><i data-lucide="briefcase"></i></span><span class="material-bank-column-label"><strong>职位描述</strong><small>岗位与招聘信息</small></span><span id="bank-count-job" class="material-bank-column-count">0</span></button>
-                <div id="bank-panel-job" class="material-bank-column-content" aria-hidden="true" inert><div id="material-bank-list-job" class="material-bank-list" role="list" aria-label="职位描述信息"></div></div>
+                <div id="bank-panel-job" class="material-bank-column-content" aria-hidden="true" inert hidden><div id="material-bank-list-job" class="material-bank-list" role="list" aria-label="职位描述信息" aria-live="polite"></div><nav id="material-bank-pagination-job" class="material-bank-pagination" aria-label="职位描述分页" hidden><button type="button" data-page-action="previous">上一页</button><span>1 / 1</span><button type="button" data-page-action="next">下一页</button></nav></div>
               </section>
-              <section class="material-bank-column" data-kind="personal">
-                <button class="material-bank-column-header" type="button" aria-expanded="false" aria-controls="bank-panel-personal"><span class="material-bank-column-icon"><i data-lucide="user"></i></span><span class="material-bank-column-label"><strong>个人信息</strong><small>经历、能力与成果</small></span><span id="bank-count-personal" class="material-bank-column-count">0</span></button>
-                <div id="bank-panel-personal" class="material-bank-column-content" aria-hidden="true" inert><div id="material-bank-list-personal" class="material-bank-list" role="list" aria-label="个人信息"></div></div>
+              <section class="material-bank-column active" data-kind="personal">
+                <button class="material-bank-column-header" type="button" aria-expanded="true" aria-controls="bank-panel-personal"><span class="material-bank-column-icon"><i data-lucide="user"></i></span><span class="material-bank-column-label"><strong>个人信息</strong><small>经历、能力与成果</small></span><span id="bank-count-personal" class="material-bank-column-count">0</span></button>
+                <div id="bank-panel-personal" class="material-bank-column-content"><div id="material-bank-list-personal" class="material-bank-list" role="list" aria-label="个人信息" aria-live="polite"></div><nav id="material-bank-pagination-personal" class="material-bank-pagination" aria-label="个人信息分页" hidden><button type="button" data-page-action="previous">上一页</button><span>1 / 1</span><button type="button" data-page-action="next">下一页</button></nav></div>
               </section>
             </div>
           </section>
@@ -229,7 +244,11 @@
         <p>每个 CV 都是独立的本地项目文件夹，拥有自己的源码、资源、主文档和 Agent 对话。</p>
         <div class="cv-library-actions"><button id="cv-library-import" class="button secondary" type="button"><i data-lucide="folder-plus"></i><span>导入现有 CV</span></button><button id="cv-library-duplicate" class="button primary" type="button"><i data-lucide="copy-plus"></i><span>复制当前 CV</span></button></div>
         <div id="cv-library-list" class="cv-library-list" role="list" aria-label="CV 项目列表"></div>
-        <div class="dialog-actions"><button id="cv-library-close" class="button secondary" type="button">完成</button></div>
+        <div class="dialog-actions cv-library-dialog-actions">
+          <p id="cv-library-selection-status" class="cv-library-selection-status" aria-live="polite">选择一份 CV 后，即可进入简历编辑器。</p>
+          <button id="cv-library-close" class="button secondary" type="button">完成</button>
+          <button id="cv-library-open-editor" class="button primary" type="button" disabled><i data-lucide="pencil"></i><span>在编辑器中打开</span></button>
+        </div>
       </form>
     </dialog>
     <dialog id="cv-duplicate-dialog" class="project-dialog cv-duplicate-dialog">
@@ -248,14 +267,67 @@
       <form id="intake-generate-form">
         <span class="eyebrow">GENERATE FROM MATERIAL BANK</span>
         <h2>生成一个新的 CV 项目</h2>
-        <p>使用 CV 库和个人资料库的结构化内容，可选一个目标职位做关键词参考。每次生成都会创建并保留一个独立项目，自动加入“我的 CV”，不会覆盖已有版本。</p>
-        <label for="intake-generate-name">新 CV 名称</label>
-        <input id="intake-generate-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：jane-data-engineer-cv" required>
-        <label for="intake-generate-job">目标职位（可选）</label>
-        <select id="intake-generate-job" class="select-input"><option value="">不指定职位</option></select>
-        <label for="intake-generate-parent">保存到父文件夹</label>
-        <div class="cv-parent-picker"><input id="intake-generate-parent" type="text" autocomplete="off" placeholder="/Users/you/Documents/CVs" required><button id="intake-generate-browse" class="button secondary" type="button">选择…</button></div>
-        <p class="template-attribution">默认模板：<a href="https://github.com/geekplux/cv_resume" target="_blank" rel="noreferrer">geekplux/cv_resume</a> · MIT · CV Studio portable edition</p>
+        <div id="intake-generate-setup" class="intake-generate-setup">
+          <p>信息银行中的选择已经锁定，不会在这里再次选择。生成结果会自动保存到 CV Studio 工作区并加入“我的 CV”。</p>
+          <section class="intake-generate-summary" aria-labelledby="intake-generate-summary-title">
+            <div><strong id="intake-generate-summary-title">本次使用的已选内容</strong><span id="intake-generate-summary-count" aria-live="polite"></span></div>
+            <ul id="intake-generate-summary-items" aria-label="已锁定的信息银行内容"></ul>
+          </section>
+          <label for="intake-generate-name">新 CV 名称</label>
+          <input id="intake-generate-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：jane-data-engineer-cv" required>
+          <fieldset class="cv-template-picker">
+            <legend>选择 CV 模板</legend>
+            <div id="intake-generate-templates" class="cv-template-options" role="radiogroup" aria-label="CV 模板预览">
+              <label class="cv-template-option">
+                <input type="radio" name="cv-template" value="classic" checked>
+                <span class="cv-template-card">
+                  <span class="cv-template-preview preview-classic" aria-hidden="true"><i class="preview-photo"></i><b></b><em></em><span></span><span></span><span></span></span>
+                  <span class="cv-template-copy"><strong>经典时间轴</strong><small>单栏 · 日期轴 · 可用照片</small><span>蓝色时间线，通用且清晰</span><em>geekplux · MIT</em></span>
+                </span>
+              </label>
+              <label class="cv-template-option">
+                <input type="radio" name="cv-template" value="awesome">
+                <span class="cv-template-card">
+                  <span class="cv-template-preview preview-awesome" aria-hidden="true"><b></b><em></em><span></span><span></span><span></span></span>
+                  <span class="cv-template-copy"><strong>醒目紧凑</strong><small>单栏 · 红色分隔 · 无照片</small><span>高密度技术简历风格</span><em>Awesome-CV · LPPL-1.3c</em></span>
+                </span>
+              </label>
+              <label class="cv-template-option">
+                <input type="radio" name="cv-template" value="sidebar">
+                <span class="cv-template-card">
+                  <span class="cv-template-preview preview-sidebar" aria-hidden="true"><i class="preview-photo"></i><b></b><em></em><span></span><span></span><span></span></span>
+                  <span class="cv-template-copy"><strong>侧栏肖像</strong><small>双栏 · 个人侧栏 · 可用照片</small><span>突出形象、技能与作品</span><em>AltaCV · LPPL-1.3+</em></span>
+                </span>
+              </label>
+              <label class="cv-template-option">
+                <input type="radio" name="cv-template" value="banking">
+                <span class="cv-template-card">
+                  <span class="cv-template-preview preview-banking" aria-hidden="true"><b></b><em></em><span></span><span></span><span></span></span>
+                  <span class="cv-template-copy"><strong>清爽银行风</strong><small>单栏 · ATS 友好 · 无照片</small><span>金融、咨询与正式投递</span><em>moderncv · LPPL-1.3c</em></span>
+                </span>
+              </label>
+            </div>
+            <p class="cv-template-note">预览展示大致版式。全部模板使用本地 XeLaTeX 中文字体回退，不会从 CDN 加载资源。</p>
+          </fieldset>
+          <label for="intake-generate-fit">职位贴合率</label>
+          <select id="intake-generate-fit" class="select-input" aria-describedby="intake-generate-fit-description">
+            <option value="strict">紧贴职位 · 全篇围绕已选职位</option>
+            <option value="focused">高度贴合 · 强调匹配经历</option>
+            <option value="balanced" selected>平衡 · 职位与完整履历兼顾</option>
+            <option value="light">轻度参考 · 只调整内容顺序</option>
+            <option value="none">完全不考虑职位描述 · 生成通用 CV</option>
+          </select>
+          <p id="intake-generate-fit-description" class="intake-generate-fit-description"></p>
+          <p id="intake-generate-error" class="intake-generate-error" role="alert" hidden></p>
+        </div>
+        <section id="intake-generate-progress" class="intake-generate-progress" aria-live="polite" aria-labelledby="intake-generate-progress-title" hidden>
+          <div class="intake-generation-visual" aria-hidden="true"><span></span><i data-lucide="sparkles"></i><b></b></div>
+          <span class="eyebrow">CV AGENT IS WORKING</span>
+          <h3 id="intake-generate-progress-title">正在生成你的 CV</h3>
+          <p id="intake-generate-progress-message">正在核对已选信息…</p>
+          <div id="intake-generate-progressbar" class="intake-generate-progressbar" role="progressbar" aria-label="CV 生成进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+          <div class="intake-generate-progress-meta"><span id="intake-generate-progress-step">准备生成</span><strong id="intake-generate-progress-percent">0%</strong></div>
+        </section>
         <div class="dialog-actions"><button id="intake-generate-cancel" class="button secondary" type="button">取消</button><button id="intake-generate-submit" class="button primary" type="submit">创建新 CV 并打开</button></div>
       </form>
     </dialog>

@@ -44,6 +44,54 @@ export function textForPdfRegion(items, bounds, limit = 5_000) {
     .slice(0, limit);
 }
 
+export function textLineForPdfItem(items, itemIndex, maximumGap = 0.035) {
+  if (!Array.isArray(items) || !Number.isInteger(itemIndex) || !items[itemIndex]?.text?.trim()) return null;
+  const target = items[itemIndex];
+  const targetMiddle = target.y + target.height / 2;
+  const candidates = items
+    .map((item, index) => ({ ...item, index }))
+    .filter((item) => item.text?.trim()
+      && Math.abs((item.y + item.height / 2) - targetMiddle) <= Math.max(target.height, item.height) * 0.72)
+    .sort((first, second) => first.x - second.x);
+  const targetPosition = candidates.findIndex((item) => item.index === itemIndex);
+  if (targetPosition < 0) return null;
+  let start = targetPosition;
+  let end = targetPosition;
+  while (start > 0) {
+    const previous = candidates[start - 1];
+    const current = candidates[start];
+    if (current.x - (previous.x + previous.width) > maximumGap) break;
+    start -= 1;
+  }
+  while (end < candidates.length - 1) {
+    const current = candidates[end];
+    const next = candidates[end + 1];
+    if (next.x - (current.x + current.width) > maximumGap) break;
+    end += 1;
+  }
+  const lineItems = candidates.slice(start, end + 1);
+  const left = Math.min(...lineItems.map((item) => item.x));
+  const top = Math.min(...lineItems.map((item) => item.y));
+  const right = Math.max(...lineItems.map((item) => item.x + item.width));
+  const bottom = Math.max(...lineItems.map((item) => item.y + item.height));
+  const text = lineItems.map((item, index) => {
+    if (!index) return item.text.trim();
+    const previous = lineItems[index - 1];
+    const gap = item.x - (previous.x + previous.width);
+    return `${gap > 0.002 ? ' ' : ''}${item.text.trim()}`;
+  }).join('').replace(/\s+/g, ' ').trim();
+  return {
+    text,
+    itemIndexes: lineItems.map((item) => item.index),
+    bounds: {
+      x: clampUnit(left),
+      y: clampUnit(top),
+      width: Math.max(.001, clampUnit(right) - clampUnit(left)),
+      height: Math.max(.001, clampUnit(bottom) - clampUnit(top)),
+    },
+  };
+}
+
 export function rotatePointClockwise(point) {
   return { x: clampUnit(1 - point.y), y: clampUnit(point.x) };
 }

@@ -17,6 +17,8 @@ const PROJECT_STATE_FILE = path.join(WORKSPACE_DIR, '.cvstudio.json');
 const INTAKE_BANK_DIR = path.join(WORKSPACE_DIR, '.cvstudio-bank');
 const INTAKE_BANK_FILE = path.join(INTAKE_BANK_DIR, 'bank.json');
 const INTAKE_ASSET_DIR = path.join(INTAKE_BANK_DIR, 'assets');
+const GENERATED_CV_DIRECTORY_NAME = 'generated-cvs';
+const GENERATED_CV_DIR = path.join(WORKSPACE_DIR, GENERATED_CV_DIRECTORY_NAME);
 const SOURCE_FILE = path.join(WORKSPACE_DIR, 'resume.tex');
 const PDF_FILE = path.join(WORKSPACE_DIR, 'resume.pdf');
 const TECTONIC_ROOT = process.env.CV_STUDIO_TECTONIC_ROOT
@@ -35,10 +37,12 @@ const MAX_INTAKE_TOTAL_BYTES = 16_000_000;
 const MAX_INTAKE_PREVIEW_BYTES = 2_500_000;
 const MAX_INTAKE_PREVIEW_TOTAL_BYTES = 7_500_000;
 const REMOTE_AGENT_TIMEOUT_MS = 300_000;
+const CV_FIT_LEVELS = new Set(['strict', 'focused', 'balanced', 'light', 'none']);
 let activeProjectRoot = WORKSPACE_DIR;
 let activeEntry = ENTRY_FILE;
 let agentRuntimePromise;
 let intakeRuntimePromise;
+let pdfRuntimePromise;
 
 function loadAgentRuntime() {
   agentRuntimePromise ||= import('./agent-runtime.mjs');
@@ -48,6 +52,11 @@ function loadAgentRuntime() {
 function loadIntakeRuntime() {
   intakeRuntimePromise ||= import('./intake-runtime.mjs');
   return intakeRuntimePromise;
+}
+
+function loadPdfRuntime() {
+  pdfRuntimePromise ||= import('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfRuntimePromise;
 }
 
 const MIME_TYPES = {
@@ -188,7 +197,8 @@ async function walkProjectFiles(directory = activeProjectRoot, prefix = '') {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (!IGNORED_PROJECT_DIRECTORIES.has(entry.name)) files.push(...await walkProjectFiles(absolutePath, relativePath));
+      const appGeneratedLibrary = path.resolve(directory) === WORKSPACE_DIR && entry.name === GENERATED_CV_DIRECTORY_NAME;
+      if (!appGeneratedLibrary && !IGNORED_PROJECT_DIRECTORIES.has(entry.name)) files.push(...await walkProjectFiles(absolutePath, relativePath));
       continue;
     }
     if (!isIgnoredProjectFile(relativePath)) {
@@ -383,6 +393,57 @@ function runCompiler(compiler) {
   });
 }
 
+async function inspectCompiledPdf(pdfPath) {
+  let document;
+  try {
+    const [{ getDocument }, bytes] = await Promise.all([loadPdfRuntime(), fs.readFile(pdfPath)]);
+    document = await getDocument({
+      data: new Uint8Array(bytes),
+      disableFontFace: true,
+      isEvalSupported: false,
+      useSystemFonts: true,
+      verbosity: 0,
+    }).promise;
+    const pages = [];
+    const pageLimit = Math.min(document.numPages, 8);
+    for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+      const items = (content.items || []).filter((item) => typeof item?.str === 'string' && item.str.trim());
+      const verticalExtents = items.map((item) => {
+        const origin = Number(item.transform?.[5]) || 0;
+        const height = Math.max(1, Math.abs(Number(item.height)) || Math.hypot(Number(item.transform?.[2]) || 0, Number(item.transform?.[3]) || 0));
+        return { bottom: origin, top: origin + height };
+      });
+      const bottom = verticalExtents.length ? Math.max(0, Math.min(...verticalExtents.map((item) => item.bottom))) : 0;
+      const top = verticalExtents.length ? Math.min(viewport.height, Math.max(...verticalExtents.map((item) => item.top))) : 0;
+      const lineBuckets = new Set(verticalExtents.map((item) => Math.round(item.bottom / 4)));
+      pages.push({
+        page: pageNumber,
+        width: Math.round(viewport.width),
+        height: Math.round(viewport.height),
+        textCharacters: items.reduce((total, item) => total + item.str.trim().length, 0),
+        textBlocks: items.length,
+        estimatedLines: lineBuckets.size,
+        verticalFillRatio: Number(((top - bottom) / Math.max(1, viewport.height)).toFixed(3)),
+        topWhitespaceRatio: Number(((viewport.height - top) / Math.max(1, viewport.height)).toFixed(3)),
+        bottomWhitespaceRatio: Number((bottom / Math.max(1, viewport.height)).toFixed(3)),
+      });
+    }
+    return {
+      pageCount: document.numPages,
+      inspectedPages: pages.length,
+      pages,
+      note: document.numPages > pageLimit ? `Only the first ${pageLimit} pages were inspected.` : 'All pages were inspected.',
+    };
+  } catch (error) {
+    return { error: `PDF layout inspection failed: ${error.message}` };
+  } finally {
+    await document?.destroy();
+  }
+}
+
 async function compileProjectSnapshot(files, entry = activeEntry) {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cvstudio-agent-'));
   try {
@@ -406,10 +467,49 @@ async function compileProjectSnapshot(files, entry = activeEntry) {
     const compiler = await findCompilerForEntry(normalizedEntry, tempRoot);
     if (!compiler) return { ok: false, error: '没有找到 LaTeX 编译器，修改尚未经过编译验证。' };
     const result = await runCompiler(compiler);
+    const layout = result.ok
+      ? await inspectCompiledPdf(path.join(tempRoot, pdfPathForEntry(normalizedEntry)))
+      : null;
     return {
       ok: result.ok,
       compiler: compiler.label,
       details: usefulCompileOutput(result.output) || (result.ok ? '编译成功。' : '编译失败，但编译器没有返回详细信息。'),
+      ...(layout ? { layout } : {}),
+    };
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function compileStandaloneProjectSnapshot(files, entry = ENTRY_FILE, binaryFiles = []) {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cvstudio-generation-'));
+  try {
+    for (const file of files) {
+      if (!file || typeof file.path !== 'string' || typeof file.source !== 'string') continue;
+      const target = projectPath(file.path, tempRoot);
+      if (!isEditableProjectFile(target.relativePath)) throw new Error(`Unsupported generated project file: ${target.relativePath}`);
+      if (Buffer.byteLength(file.source, 'utf8') > MAX_PROJECT_FILE_SIZE) throw new Error(`Generated project file is too large: ${target.relativePath}`);
+      await fs.mkdir(path.dirname(target.absolutePath), { recursive: true });
+      await fs.writeFile(target.absolutePath, file.source, 'utf8');
+    }
+    for (const file of binaryFiles) {
+      if (!file || typeof file.path !== 'string' || typeof file.sourcePath !== 'string') continue;
+      const target = projectPath(file.path, tempRoot);
+      await fs.mkdir(path.dirname(target.absolutePath), { recursive: true });
+      await fs.copyFile(file.sourcePath, target.absolutePath);
+    }
+    const normalizedEntry = projectPath(entry, tempRoot).relativePath;
+    const compiler = await findCompilerForEntry(normalizedEntry, tempRoot);
+    if (!compiler) return { ok: false, error: '没有找到 LaTeX 编译器，生成内容尚未经过编译验证。' };
+    const result = await runCompiler(compiler);
+    const layout = result.ok
+      ? await inspectCompiledPdf(path.join(tempRoot, pdfPathForEntry(normalizedEntry)))
+      : null;
+    return {
+      ok: result.ok,
+      compiler: compiler.label,
+      details: usefulCompileOutput(result.output) || (result.ok ? '编译成功。' : '编译失败，但编译器没有返回详细信息。'),
+      ...(layout ? { layout } : {}),
     };
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -698,12 +798,16 @@ function assetExtension(attachment) {
   })[attachment.mimeType] || '.bin';
 }
 
+function generatedPhotoExtension(asset) {
+  return ({ 'image/png': '.png', 'image/jpeg': '.jpg' })[asset?.mimeType] || '';
+}
+
 async function commitIntakeSubmission(body) {
   const rawText = typeof body.text === 'string' ? body.text.trim().slice(0, 120_000) : '';
   const rawHtml = typeof body.html === 'string' ? body.html.trim().slice(0, 180_000) : '';
   const attachments = normalizeIntakeAttachments(body.attachments, true);
   const { hasMeaningfulExtractedContent, normalizeIntakeSegments } = await loadIntakeRuntime();
-  const segments = normalizeIntakeSegments(body.segments, rawText, attachments.length);
+  const segments = normalizeIntakeSegments(body.segments, rawText, attachments);
   if (!segments.length) throw new Error('At least one reviewed intake segment is required.');
   const unreadable = segments.filter((segment) => !hasMeaningfulExtractedContent(segment));
   if (unreadable.length) throw new Error(`有 ${unreadable.length} 条材料还没有提取出可入库内容。请使用视觉模型、补充文字或移除这些条目。`);
@@ -756,26 +860,57 @@ async function commitIntakeSubmission(body) {
 }
 
 async function deleteIntakeItem(itemId) {
-  const bank = await readIntakeBank();
-  const index = bank.items.findIndex((item) => item.id === itemId);
-  if (index < 0) throw new Error('Bank item was not found.');
-  const [removed] = bank.items.splice(index, 1);
-  await writeIntakeBank(bank);
-  return { removed: removed.id, bank: publicIntakeBank(bank) };
+  const result = await deleteIntakeItems([itemId]);
+  return { removed: itemId, bank: result.bank };
 }
 
-async function generateCvFromBank({ parentPath, name, itemIds, jobId }) {
-  if (typeof parentPath !== 'string' || !parentPath.trim()) throw new Error('Choose a parent folder for the generated CV.');
+async function deleteIntakeItems(itemIds) {
+  if (!Array.isArray(itemIds)) throw new Error('itemIds must be an array.');
+  const requestedIds = [...new Set(itemIds.flatMap((itemId) => typeof itemId === 'string' && itemId.trim() ? [itemId.trim()] : []))];
+  if (!requestedIds.length) throw new Error('Select at least one information bank item to delete.');
+  if (requestedIds.length > 1_000) throw new Error('Cannot delete more than 1,000 information bank items at once.');
+  const bank = await readIntakeBank();
+  const existingIds = new Set(bank.items.map((item) => item.id));
+  const missingIds = requestedIds.filter((itemId) => !existingIds.has(itemId));
+  if (missingIds.length) throw new Error(`Bank item was not found: ${missingIds[0]}`);
+  const requested = new Set(requestedIds);
+  bank.items = bank.items.filter((item) => !requested.has(item.id));
+  await writeIntakeBank(bank);
+  return { removed: requestedIds, bank: publicIntakeBank(bank) };
+}
+
+function selectPersonalBankItems(items, itemIds) {
+  if (!Array.isArray(itemIds)) return [];
+  const requestedIds = new Set(itemIds.filter((id) => typeof id === 'string'));
+  return (Array.isArray(items) ? items : []).filter((item) => ['cv', 'personal'].includes(item.kind)
+    && requestedIds.has(item.id))
+    .map((item) => ({ ...item, kind: 'personal' }));
+}
+
+function selectJobBankItems(items, itemIds) {
+  if (!Array.isArray(itemIds)) return [];
+  const requestedIds = new Set(itemIds.filter((id) => typeof id === 'string'));
+  return (Array.isArray(items) ? items : []).filter((item) => item.kind === 'job' && requestedIds.has(item.id));
+}
+
+function normalizeCvFitLevel(value, hasJobs = true) {
+  if (!hasJobs) return 'none';
+  return CV_FIT_LEVELS.has(value) ? value : 'balanced';
+}
+
+async function generateCvFromBank({ name, itemIds, fitLevel, provider, templateId = 'classic' }, { onProgress, abortSignal } = {}) {
+  const progress = (event) => {
+    try { onProgress?.(event); } catch { /* A closed progress stream must not corrupt generation. */ }
+  };
+  abortSignal?.throwIfAborted();
+  progress({ phase: 'validate', percent: 4, message: '正在核对已选信息…' });
   const projectName = typeof name === 'string' ? name.trim() : '';
   if (!projectName || projectName.length > 100 || projectName === '.' || projectName === '..'
     || projectName.startsWith('.') || /[\\/\0]/.test(projectName)) {
     throw new Error('CV name must be a normal folder name without slashes.');
   }
-  const parent = path.resolve(parentPath.trim());
-  const parentStats = await fs.stat(parent);
-  if (!parentStats.isDirectory()) throw new Error('The selected parent path is not a folder.');
-  const parentRealRoot = await fs.realpath(parent);
-  if (parentRealRoot === path.parse(parentRealRoot).root) throw new Error('Choose a normal parent folder, not the filesystem root.');
+  const parent = GENERATED_CV_DIR;
+  await fs.mkdir(parent, { recursive: true });
   const targetRoot = path.join(parent, projectName);
   try {
     await fs.access(targetRoot);
@@ -785,20 +920,109 @@ async function generateCvFromBank({ parentPath, name, itemIds, jobId }) {
   }
 
   const bank = await readIntakeBank();
-  const requestedIds = new Set(Array.isArray(itemIds) ? itemIds.filter((id) => typeof id === 'string') : []);
-  const selected = bank.items.filter((item) => ['cv', 'personal'].includes(item.kind)
-    && (!requestedIds.size || requestedIds.has(item.id)))
-    .map((item) => ({ ...item, kind: 'personal' }));
-  if (!selected.length) throw new Error('Add at least one personal information item to the information bank first.');
-  const targetJob = typeof jobId === 'string' ? bank.items.find((item) => item.id === jobId && item.kind === 'job') || null : null;
+  const requestedIds = [...new Set(Array.isArray(itemIds) ? itemIds.filter((id) => typeof id === 'string' && id.trim()) : [])];
+  const existingIds = new Set(bank.items.map((item) => item.id));
+  const missingId = requestedIds.find((itemId) => !existingIds.has(itemId));
+  if (missingId) throw new Error(`A selected information-bank item no longer exists: ${missingId}`);
+  const selected = selectPersonalBankItems(bank.items, itemIds);
+  if (!selected.length) throw new Error('Select at least one personal information item before generating a CV.');
+  const selectedJobs = selectJobBankItems(bank.items, itemIds);
+  const fit = normalizeCvFitLevel(fitLevel, selectedJobs.length > 0);
+  const targetJobs = fit === 'none' ? [] : selectedJobs;
+  const providerConfig = provider && typeof provider === 'object' ? provider : { type: 'local' };
+  const providerType = providerConfig.type || 'local';
+  if (!['local', 'openai', 'anthropic', 'hermes'].includes(providerType)) throw new Error('Unsupported Agent provider.');
+  const { buildGeneratedCvFiles, CV_TEMPLATE_REGISTRY, getCvTemplate } = await loadIntakeRuntime();
+  if (!CV_TEMPLATE_REGISTRY.some((templateOption) => templateOption.id === templateId)) throw new Error('Unsupported CV template.');
+  const selectedTemplate = getCvTemplate(templateId);
+  abortSignal?.throwIfAborted();
+  progress({
+    phase: 'prepare',
+    percent: 12,
+    message: `已锁定 ${selected.length} 条个人信息${selectedJobs.length ? `和 ${selectedJobs.length} 个职位` : ''}。`,
+  });
   const assets = new Map(bank.assets.map((asset) => [asset.id, asset]));
-  const isRenderablePhoto = (asset) => /^(?:image\/(?:png|jpeg|webp))$/.test(asset?.mimeType || '');
-  const photoAsset = selected.flatMap((item) => item.fields?.personal?.category === 'photo' ? item.assetIds || [] : [])
-    .map((id) => assets.get(id)).find(isRenderablePhoto)
-    || selected.flatMap((item) => item.assetIds || []).map((id) => assets.get(id)).find(isRenderablePhoto);
-  const photoPath = photoAsset ? `assets/profile${assetExtension(photoAsset)}` : '';
-  const { buildGeneratedCvFiles } = await loadIntakeRuntime();
-  const generatedFiles = buildGeneratedCvFiles({ items: selected, jobItem: targetJob, photoPath });
+  const isRenderablePhoto = (asset) => /^(?:image\/(?:png|jpeg))$/.test(asset?.mimeType || '');
+  const explicitPhotoIds = selected.flatMap((item) => item.fields?.profile?.isPhoto === true
+    || item.fields?.personal?.category === 'photo' ? item.assetIds || [] : []);
+  const photoAsset = explicitPhotoIds.map((id) => assets.get(id)).find(isRenderablePhoto);
+  const photoPath = photoAsset ? `assets/profile${generatedPhotoExtension(photoAsset)}` : '';
+  const generatedFiles = buildGeneratedCvFiles({ items: selected, jobItems: targetJobs, fitLevel: fit, photoPath, templateId: selectedTemplate.id });
+  const baseResumeSource = generatedFiles['resume.tex'];
+  const binaryFiles = photoAsset ? [{
+    path: photoPath,
+    sourcePath: path.join(INTAKE_ASSET_DIR, photoAsset.fileName),
+  }] : [];
+  progress({
+    phase: providerType === 'local' ? 'local' : 'agent',
+    step: providerType === 'local' ? 1 : 0,
+    maxSteps: providerType === 'local' ? 3 : 20,
+    percent: 22,
+    message: providerType === 'local' ? '本地规则已建立 CV 基础结构。' : 'CV Agent 正在读取已选信息…',
+  });
+
+  let agentResult = null;
+  let agentEditApplied = false;
+  if (providerType !== 'local') {
+    const { CV_GENERATION_MAX_STEPS, runCvGenerationAgent } = await loadAgentRuntime();
+    agentResult = await runCvGenerationAgent({
+      provider: providerConfig,
+      fitLevel: fit,
+      template: selectedTemplate,
+      files: Object.entries(generatedFiles).map(([filePath, source]) => ({ path: filePath, source })),
+      entry: ENTRY_FILE,
+      normalizePath: normalizeProjectPath,
+      inspectResume,
+      compileSnapshot: (files, entry) => compileStandaloneProjectSnapshot(files, entry, binaryFiles),
+      abortSignal,
+      onProgress(event) {
+        const step = Math.max(1, Number(event.step) || 1);
+        const maxSteps = Math.max(1, Number(event.maxSteps) || CV_GENERATION_MAX_STEPS);
+        progress({
+          phase: 'agent',
+          step,
+          maxSteps,
+          percent: Math.min(82, 22 + Math.round((step / maxSteps) * 60)),
+          message: event.message || 'CV Agent 正在生成…',
+          tools: event.tools || [],
+        });
+      },
+    });
+    const resumeEdit = (agentResult.rawResult?.edits || []).find((edit) => {
+      try { return normalizeProjectPath(edit.path) === ENTRY_FILE && typeof edit.source === 'string'; } catch { return false; }
+    });
+    if (resumeEdit && Buffer.byteLength(resumeEdit.source, 'utf8') <= MAX_PROJECT_FILE_SIZE
+      && /\\documentclass(?:\[[^\]]*\])?\{/.test(resumeEdit.source)) {
+      generatedFiles[ENTRY_FILE] = resumeEdit.source;
+      agentEditApplied = generatedFiles[ENTRY_FILE] !== baseResumeSource;
+    }
+  } else {
+    progress({ phase: 'local', step: 2, maxSteps: 3, percent: 58, message: fit === 'none' ? '正在生成通用 CV，不读取职位描述。' : '正在按职位贴合率排序相关经历。' });
+  }
+
+  abortSignal?.throwIfAborted();
+  progress({ phase: 'compile', step: providerType === 'local' ? 3 : undefined, maxSteps: providerType === 'local' ? 3 : undefined, percent: 86, message: '正在验证生成的 LaTeX…' });
+  let compileResult = await compileStandaloneProjectSnapshot(
+    Object.entries(generatedFiles).map(([filePath, source]) => ({ path: filePath, source })),
+    ENTRY_FILE,
+    binaryFiles,
+  );
+  if (!compileResult.ok && !compileResult.error && agentEditApplied) {
+    generatedFiles[ENTRY_FILE] = baseResumeSource;
+    agentEditApplied = false;
+    progress({ phase: 'compile', percent: 89, message: 'Agent 版本编译失败，正在恢复已验证的基础版本…' });
+    compileResult = await compileStandaloneProjectSnapshot(
+      Object.entries(generatedFiles).map(([filePath, source]) => ({ path: filePath, source })),
+      ENTRY_FILE,
+      binaryFiles,
+    );
+  }
+  if (!compileResult.ok && !compileResult.error) {
+    throw new Error(`Generated CV failed LaTeX validation. ${compileResult.details || ''}`.trim());
+  }
+
+  abortSignal?.throwIfAborted();
+  progress({ phase: 'save', percent: 94, message: '正在保存到 CV Studio 工作区…' });
   const tempRoot = path.join(parent, `.${projectName}.cvstudio-generate-${crypto.randomBytes(6).toString('hex')}`);
   try {
     await fs.mkdir(tempRoot, { recursive: false });
@@ -821,14 +1045,41 @@ async function generateCvFromBank({ parentPath, name, itemIds, jobId }) {
   return {
     ...state,
     generatedFrom: selected.map((item) => item.id),
-    targetJob: targetJob?.id || null,
-    template: { name: 'geekplux/cv_resume · CV Studio portable edition', license: 'MIT' },
+    selectedJobs: selectedJobs.map((item) => item.id),
+    targetJobs: targetJobs.map((item) => item.id),
+    fitLevel: fit,
+    savedByApp: true,
+    generation: {
+      mode: providerType === 'local' ? 'local' : 'agent',
+      provider: agentResult?.provider || providerType,
+      model: agentResult?.model || null,
+      steps: agentResult?.steps || (providerType === 'local' ? 3 : 1),
+      maxSteps: agentResult?.maxSteps || (providerType === 'local' ? 3 : 20),
+      agentEditApplied,
+      compile: compileResult,
+      trace: agentResult?.trace || [],
+    },
+    template: {
+      id: selectedTemplate.id,
+      name: selectedTemplate.name,
+      layout: selectedTemplate.layout,
+      license: selectedTemplate.license,
+      sourceName: selectedTemplate.sourceName,
+      sourceUrl: selectedTemplate.sourceUrl,
+      supportsPhoto: selectedTemplate.supportsPhoto,
+      photoAvailable: Boolean(photoAsset),
+      photoRendered: Boolean(photoAsset && selectedTemplate.supportsPhoto),
+    },
   };
 }
 
 function sendJson(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+function sendNdjsonEvent(response, event) {
+  if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(event)}\n`);
 }
 
 function formatAgentProviderError(error, providerType = 'provider') {
@@ -956,6 +1207,16 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/intake/items/delete') {
+    const body = await readJson(request);
+    try {
+      sendJson(response, 200, await deleteIntakeItems(body.itemIds));
+    } catch (error) {
+      sendJson(response, /not found/i.test(error.message) ? 404 : 400, { error: error.message });
+    }
+    return;
+  }
+
   if (request.method === 'DELETE' && url.pathname.startsWith('/api/intake/items/')) {
     try {
       const itemId = decodeURIComponent(url.pathname.slice('/api/intake/items/'.length));
@@ -968,10 +1229,41 @@ async function handleRequest(request, response) {
 
   if (request.method === 'POST' && url.pathname === '/api/intake/generate') {
     const body = await readJson(request);
+    const wantsProgress = /(?:^|,)\s*application\/x-ndjson\b/i.test(request.headers.accept || '');
+    const requestAbort = new AbortController();
+    request.once('aborted', () => requestAbort.abort(new Error('Generation request was cancelled.')));
+    response.once('close', () => {
+      if (!response.writableEnded) requestAbort.abort(new Error('Generation request was cancelled.'));
+    });
+    const abortSignal = AbortSignal.any([requestAbort.signal, AbortSignal.timeout(REMOTE_AGENT_TIMEOUT_MS)]);
+    if (wantsProgress) {
+      response.writeHead(200, {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      try {
+        const state = await generateCvFromBank(body, {
+          abortSignal,
+          onProgress(event) { sendNdjsonEvent(response, { type: 'progress', ...event }); },
+        });
+        sendNdjsonEvent(response, { type: 'progress', phase: 'complete', percent: 100, message: 'CV 已生成并保存。' });
+        sendNdjsonEvent(response, { type: 'complete', state });
+      } catch (error) {
+        const message = formatAgentProviderError(error, body.provider?.type || 'generation');
+        sendNdjsonEvent(response, { type: 'error', error: message });
+      }
+      response.end();
+      return;
+    }
     try {
-      sendJson(response, 201, await generateCvFromBank(body));
+      sendJson(response, 201, await generateCvFromBank(body, { abortSignal }));
     } catch (error) {
-      sendJson(response, 400, { error: error.message });
+      const providerType = body.provider?.type || 'local';
+      const message = formatAgentProviderError(error, providerType);
+      const configurationError = /API key|Base URL|gateway|配置|401|403|找不到所选模型/.test(message);
+      sendJson(response, providerType === 'local' || configurationError ? 400 : 502, { error: message });
     }
     return;
   }
@@ -1307,13 +1599,19 @@ if (require.main === module) {
 }
 
 module.exports = {
+  deleteIntakeItems,
   detectProjectEntry,
+  generatedPhotoExtension,
   isEditableProjectFile,
+  inspectCompiledPdf,
   localResumeAgent,
   formatAgentProviderError,
   normalizeAgentResult,
+  normalizeCvFitLevel,
   normalizeVisualContext,
   normalizeProjectPath,
   pdfPathForEntry,
+  selectJobBankItems,
+  selectPersonalBankItems,
   start,
 };

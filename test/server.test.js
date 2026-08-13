@@ -1,17 +1,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const {
   detectProjectEntry,
   formatAgentProviderError,
+  generatedPhotoExtension,
   isEditableProjectFile,
+  inspectCompiledPdf,
   localResumeAgent,
   normalizeAgentResult,
+  normalizeCvFitLevel,
   normalizeVisualContext,
   normalizeProjectPath,
   pdfPathForEntry,
+  selectJobBankItems,
+  selectPersonalBankItems,
   start,
 } = require('../server');
+
+test('extracts bounded rendered-layout metrics from a compiled CV PDF', async () => {
+  const layout = await inspectCompiledPdf(path.join(__dirname, '..', 'workspace', 'resume.pdf'));
+
+  assert.equal(layout.pageCount, 1);
+  assert.equal(layout.inspectedPages, 1);
+  assert.ok(layout.pages[0].textCharacters > 0);
+  assert.ok(layout.pages[0].verticalFillRatio > 0);
+  assert.ok(layout.pages[0].topWhitespaceRatio >= 0);
+});
+
+test('derives generated profile-photo extensions from verified MIME types', () => {
+  assert.equal(generatedPhotoExtension({ name: 'portrait.jpg', mimeType: 'image/png' }), '.png');
+  assert.equal(generatedPhotoExtension({ name: 'portrait.png', mimeType: 'image/jpeg' }), '.jpg');
+  assert.equal(generatedPhotoExtension({ name: 'portrait.bin', mimeType: 'image/webp' }), '');
+  assert.equal(generatedPhotoExtension({ name: 'portrait.gif', mimeType: 'image/gif' }), '');
+});
 
 test('starts the embedded service on an ephemeral loopback port', async (t) => {
   let embedded;
@@ -40,6 +63,21 @@ test('turns provider failures into actionable Agent errors', () => {
   assert.match(formatAgentProviderError({ statusCode: 403, message: 'Forbidden' }, 'anthropic'), /权限.*Base URL/);
   assert.match(formatAgentProviderError({ statusCode: 429, message: 'rate limit' }, 'openai'), /稍后重试.*额度/);
   assert.match(formatAgentProviderError({ message: 'request timed out' }, 'openai'), /300 秒/);
+});
+
+test('requires an explicit material selection for generated CVs', () => {
+  const items = [
+    { id: 'profile', kind: 'personal' },
+    { id: 'project-a', kind: 'personal' },
+    { id: 'job', kind: 'job' },
+  ];
+  assert.deepEqual(selectPersonalBankItems(items), []);
+  assert.deepEqual(selectPersonalBankItems(items, ['project-a']).map((item) => item.id), ['project-a']);
+  assert.deepEqual(selectPersonalBankItems(items, []), []);
+  assert.deepEqual(selectJobBankItems(items, ['job']).map((item) => item.id), ['job']);
+  assert.equal(normalizeCvFitLevel('strict', true), 'strict');
+  assert.equal(normalizeCvFitLevel('unexpected', true), 'balanced');
+  assert.equal(normalizeCvFitLevel('strict', false), 'none');
 });
 
 test('normalizes safe project paths', () => {

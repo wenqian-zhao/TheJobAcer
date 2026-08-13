@@ -3,9 +3,15 @@ import { resolveAgentModel } from './agent-runtime.mjs';
 
 const INTAKE_KINDS = new Set(['job', 'personal']);
 const PERSONAL_CATEGORIES = new Set([
-  'profile', 'contact', 'summary', 'experience', 'project', 'education', 'skill', 'photo',
-  'award', 'extracurricular', 'social_practice', 'talk', 'publication', 'other',
+  'profile', 'project', 'experience', 'award', 'education', 'skill',
+  'extracurricular', 'social_practice', 'talk', 'publication',
 ]);
+const LEGACY_PERSONAL_CATEGORY_ALIASES = {
+  contact: 'profile',
+  summary: 'profile',
+  photo: 'profile',
+  other: 'profile',
+};
 const MAX_SEGMENTS = 40;
 const MAX_TEXT = 120_000;
 
@@ -18,9 +24,26 @@ Use exactly these two kinds:
 - job: a job description, recruiter role brief, requirements, or hiring conversation that describes a role.
 - personal: one reusable category of facts about the user.
 
-A resume/CV is only a source document. NEVER return a CV as one segment and never use "cv" as a kind. Decompose every resume into separate personal segments, one segment per supported category found in the source. Use these personal.category values and no others:
-- profile: combined core identity and personal introduction/profile summary.
-- contact: contact details when they are substantial enough to stand alone.
+The UI exposes exactly these ten personal-information categories. Recognize them by these Chinese names and map them to the listed internal values; do not return any additional category:
+- 个人信息 = profile
+- 项目经历 = project
+- 工作经历 = experience
+- 荣誉和奖项 = award
+- 教育经历 = education
+- 专业技能 = skill
+- 课外活动 = extracurricular
+- 社会实践 = social_practice
+- 演讲和讲座 = talk
+- 论文发表 = publication
+Use “个人信息”, never “个人简介”, as the user-facing name for profile.
+
+Personal photos are part of profile, not a separate category. When an attachment is clearly the
+candidate's portrait or headshot, return a personal profile segment that references that image and
+set fields.profile.isPhoto to true. Never mark screenshots, certificates, portfolio images, logos,
+or document scans as personal photos. A photo segment may otherwise have empty text fields.
+
+A resume/CV is only a source document. NEVER return a CV as one segment and never use "cv" as a kind. Decompose every resume into separate reusable personal segments. Return each individual job or internship as its own experience segment, and each individual project as its own project segment; each of those segments must contain exactly one record in fields.experiences or fields.projects. Other material can use one segment per supported category. Use these personal.category values and no others:
+- profile: core identity, name, contact details, links, headline, and personal introduction/profile summary.
 - experience: work or internship experience.
 - project: project experience.
 - education: education history.
@@ -30,15 +53,13 @@ A resume/CV is only a source document. NEVER return a CV as one segment and neve
 - social_practice: social practice, community fieldwork, public service, and related experience.
 - talk: speeches, talks, lectures, panels, and presentations delivered.
 - publication: papers, articles, books, patents, and other publications.
-- photo: personal/profile photo.
-- summary or other: only when none of the more specific categories fit.
 
-Order personal segments by typical resume usefulness: profile, experience, project, education, skill, award, extracurricular, social_practice, publication, talk, then other. Do not create empty categories.
+Order personal segments by typical resume usefulness: profile, experience, project, education, skill, award, extracurricular, social_practice, talk, publication. Do not create empty categories. If source material does not fit one of these categories, omit it instead of inventing an "other" category.
 
-Never invent facts, dates, metrics, employers, schools, contact details, or skills. Preserve uncertainty in summary/content.
-The bank stores extracted knowledge, not opaque files. For every segment, content must contain a grounded transcription, description, or cleaned source excerpt, and fields must contain every reusable fact you can support from the source. A screenshot or scanned PDF must be interpreted from its visual preview; do not return an empty file placeholder.
+Never invent facts, dates, metrics, employers, schools, contact details, or skills. Preserve uncertainty in content.
+The bank stores copyable user facts, not Agent commentary or opaque files. For every segment, content must be only the user's source-grounded wording: a verbatim transcription or lightly cleaned source excerpt that can be pasted directly into a CV. Do not add extraction notes, interpretations, advice, labels, redundant titles, repeated structured summaries, or descriptions of the source file. Keep one fact once. fields must contain every reusable fact you can support from the same source. A screenshot or scanned PDF must be interpreted from its visual preview; do not return an empty file placeholder.
 Return only JSON with this exact top-level shape:
-{"segments":[{"kind":"job|personal","title":"short human title","summary":"one sentence","content":"only the source-grounded excerpt for this category","confidence":0.0,"attachmentIndexes":[0],"fields":{"profile":{"name":"","headline":"","email":"","phone":"","location":"","website":"","linkedin":"","github":"","summary":""},"experiences":[{"dates":"","role":"","organization":"","location":"","bullets":[""]}],"education":[{"dates":"","degree":"","institution":"","location":"","details":[""]}],"projects":[{"dates":"","name":"","role":"","url":"","bullets":[""]}],"skills":[{"category":"","items":[""]}],"job":{"title":"","company":"","location":"","employmentType":"","description":"","requirements":[""],"keywords":[""]},"personal":{"category":"profile|contact|summary|experience|project|education|skill|photo|award|extracurricular|social_practice|talk|publication|other","label":"","details":""}}}]}
+{"segments":[{"kind":"job|personal","title":"short factual title","summary":"short factual descriptor only","content":"copyable user wording for this category only","confidence":0.0,"attachmentIndexes":[0],"fields":{"profile":{"name":"","headline":"","email":"","phone":"","location":"","website":"","linkedin":"","github":"","summary":"","isPhoto":false},"experiences":[{"dates":"","role":"","organization":"","location":"","bullets":[""]}],"education":[{"dates":"","degree":"","institution":"","location":"","details":[""]}],"projects":[{"dates":"","name":"","role":"","url":"","bullets":[""]}],"skills":[{"category":"","items":[""]}],"job":{"title":"","company":"","location":"","employmentType":"","description":"","requirements":[""],"keywords":[""]},"personal":{"category":"profile|project|experience|award|education|skill|extracurricular|social_practice|talk|publication","label":"","details":""}}}]}
 Omit empty arrays where practical. attachmentIndexes are zero-based and should link only relevant attachments.`;
 
 function shortText(value, limit = 4_000) {
@@ -53,8 +74,11 @@ function stringList(value, limit = 20) {
 
 function normalizeProfile(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return Object.fromEntries(['name', 'headline', 'email', 'phone', 'location', 'website', 'linkedin', 'github', 'summary']
-    .map((key) => [key, shortText(source[key], key === 'summary' ? 4_000 : 500)]));
+  return {
+    ...Object.fromEntries(['name', 'headline', 'email', 'phone', 'location', 'website', 'linkedin', 'github', 'summary']
+      .map((key) => [key, shortText(source[key], key === 'summary' ? 4_000 : 500)])),
+    isPhoto: source.isPhoto === true,
+  };
 }
 
 function normalizeRecordList(value, scalarKeys, listKey) {
@@ -65,6 +89,11 @@ function normalizeRecordList(value, scalarKeys, listKey) {
     normalized[listKey] = stringList(item[listKey], 20);
     return Object.values(normalized).some((entry) => Array.isArray(entry) ? entry.length : entry) ? [normalized] : [];
   });
+}
+
+function canonicalPersonalCategory(value) {
+  if (PERSONAL_CATEGORIES.has(value)) return value;
+  return LEGACY_PERSONAL_CATEGORY_ALIASES[value] || 'profile';
 }
 
 export function normalizeIntakeFields(value = {}) {
@@ -87,7 +116,7 @@ export function normalizeIntakeFields(value = {}) {
       keywords: stringList(job.keywords, 40),
     },
     personal: {
-      category: PERSONAL_CATEGORIES.has(personal.category) ? personal.category : 'other',
+      category: canonicalPersonalCategory(personal.category),
       label: shortText(personal.label, 500),
       details: shortText(personal.details, 8_000),
     },
@@ -102,6 +131,7 @@ export function hasMeaningfulExtractedContent(segment = {}) {
   if (hasTextValue(segment.content)) return true;
   const fields = segment.fields || {};
   if (Object.values(fields.profile || {}).some(hasTextValue)) return true;
+  if (fields.profile?.isPhoto === true && Array.isArray(segment.photoAttachmentIndexes) && segment.photoAttachmentIndexes.length) return true;
   if (['experiences', 'education', 'projects', 'skills'].some((key) => Array.isArray(fields[key]) && fields[key].length)) return true;
   if (segment.kind === 'job') {
     const job = fields.job || {};
@@ -113,31 +143,67 @@ export function hasMeaningfulExtractedContent(segment = {}) {
 }
 
 const PERSONAL_CATEGORY_TITLES = {
-  profile: '个人简介', contact: '联系方式', summary: '个人简介', experience: '工作经历', project: '项目经历',
-  education: '教育经历', skill: '专业技能', photo: '个人照片', award: '荣誉和奖项',
-  extracurricular: '课外活动', social_practice: '社会实践', talk: '演讲和讲座', publication: '论文发表', other: '其他个人信息',
+  profile: '个人信息', project: '项目经历', experience: '工作经历', award: '荣誉和奖项',
+  education: '教育经历', skill: '专业技能', extracurricular: '课外活动',
+  social_practice: '社会实践', talk: '演讲和讲座', publication: '论文发表',
 };
-const PERSONAL_CATEGORY_ORDER = ['profile', 'summary', 'contact', 'experience', 'project', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'publication', 'talk', 'photo', 'other'];
+const PERSONAL_CATEGORY_ORDER = ['profile', 'experience', 'project', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'];
 
 function hasProfileFields(profile = {}) {
-  return Object.values(profile).some(hasTextValue);
+  return profile.isPhoto === true || Object.values(profile).some(hasTextValue);
+}
+
+function recordContent(parts, details = []) {
+  return [...parts.filter(Boolean), ...details.filter(Boolean)].join('\n').trim();
+}
+
+function profileContent(profile = {}) {
+  return [profile.name, profile.headline, profile.email, profile.phone, profile.location,
+    profile.website, profile.linkedin, profile.github, profile.summary].filter(Boolean).join('\n').trim();
+}
+
+function educationContent(records = []) {
+  return records.map((record) => recordContent([
+    [record.degree, record.institution].filter(Boolean).join(' · '),
+    [record.dates, record.location].filter(Boolean).join(' · '),
+  ], record.details)).filter(Boolean).join('\n\n');
+}
+
+function skillsContent(records = []) {
+  return records.map((record) => [record.category, ...(record.items || [])].filter(Boolean).join(' · '))
+    .filter(Boolean).join('\n');
 }
 
 function expandPersonalSegment(segment, wasCvSource = false) {
   const fields = segment.fields;
-  const personal = fields.personal || { category: 'other', label: '', details: '' };
+  const personal = fields.personal || { category: 'profile', label: '', details: '' };
   const groups = [];
-  const addGroup = (category, partialFields) => groups.push({ category, partialFields });
-  if (hasProfileFields(fields.profile)) addGroup('profile', { profile: fields.profile });
-  if (fields.experiences.length) addGroup('experience', { experiences: fields.experiences });
-  if (fields.projects.length) addGroup('project', { projects: fields.projects });
-  if (fields.education.length) addGroup('education', { education: fields.education });
-  if (fields.skills.length) addGroup('skill', { skills: fields.skills });
+  const addGroup = (category, partialFields, presentation = {}) => groups.push({ category, partialFields, presentation });
+  if (hasProfileFields(fields.profile)) addGroup('profile', { profile: fields.profile }, { content: profileContent(fields.profile) });
+  fields.experiences.forEach((experience, index) => {
+    const title = [experience.role, experience.organization].filter(Boolean).join(' · ') || `工作经历 ${index + 1}`;
+    const content = recordContent([experience.dates, title, experience.location], experience.bullets);
+    addGroup('experience', {
+      experiences: [experience],
+      personal: { category: 'experience', label: title, details: content },
+    }, { title, content, summary: [experience.dates, experience.location].filter(Boolean).join(' · ') });
+  });
+  fields.projects.forEach((project, index) => {
+    const title = [project.name, project.role].filter(Boolean).join(' · ') || `项目经历 ${index + 1}`;
+    const content = recordContent([project.dates, title, project.url], project.bullets);
+    addGroup('project', {
+      projects: [project],
+      personal: { category: 'project', label: title, details: content },
+    }, { title, content, summary: [project.dates, project.url].filter(Boolean).join(' · ') });
+  });
+  if (fields.education.length) addGroup('education', { education: fields.education }, { content: educationContent(fields.education) });
+  if (fields.skills.length) addGroup('skill', { skills: fields.skills }, { content: skillsContent(fields.skills) });
   if (personal.label || personal.details) {
-    const matching = groups.find((group) => group.category === personal.category
-      || (group.category === 'profile' && ['contact', 'summary'].includes(personal.category)));
-    if (matching) matching.partialFields.personal = personal;
-    else addGroup(personal.category, { personal });
+    const matching = groups.find((group) => group.category === personal.category);
+    if (matching) {
+      if (!matching.partialFields.personal) matching.partialFields.personal = personal;
+      if (personal.details && !matching.presentation.content) matching.presentation.content = personal.details;
+    } else addGroup(personal.category, { personal }, { content: personal.details || personal.label });
   }
   if (!groups.length) {
     if (wasCvSource) {
@@ -147,22 +213,24 @@ function expandPersonalSegment(segment, wasCvSource = false) {
         title: 'CV 尚未完成结构化提取',
         summary: '没有提取出可复用类目，请重新分析或手动补充后再入库。',
         content: '',
-        fields: normalizeIntakeFields({ personal: { category: 'other' } }),
+        fields: normalizeIntakeFields({ personal: { category: 'profile' } }),
       };
       unreadable.extractionStatus = 'unreadable';
       return [unreadable];
     }
     return [segment];
   }
-  return groups.map(({ category, partialFields }, groupIndex) => {
-    const title = PERSONAL_CATEGORY_TITLES[category] || PERSONAL_CATEGORY_TITLES.other;
+  return groups.map(({ category, partialFields, presentation }, groupIndex) => {
+    const categoryTitle = PERSONAL_CATEGORY_TITLES[category] || PERSONAL_CATEGORY_TITLES.profile;
+    const title = presentation.title || (groups.length === 1 && !wasCvSource ? segment.title : categoryTitle);
+    const useOriginalContent = groups.length === 1 && !wasCvSource && segment.content;
     const derived = {
       ...segment,
       id: `${segment.id}-${category}-${groupIndex + 1}`,
       kind: 'personal',
-      title: groups.length === 1 && !wasCvSource ? segment.title : title,
-      summary: groups.length === 1 && !wasCvSource ? segment.summary : `从“${segment.title}”中提取的${title}`,
-      content: groups.length === 1 || personal.category === category ? segment.content : '',
+      title,
+      summary: presentation.summary || (groups.length === 1 && !wasCvSource ? segment.summary : categoryTitle),
+      content: useOriginalContent || presentation.content || (personal.category === category ? personal.details : ''),
       fields: normalizeIntakeFields({ ...partialFields, personal: partialFields.personal || { category } }),
     };
     derived.extractionStatus = hasMeaningfulExtractedContent(derived) ? 'extracted' : 'unreadable';
@@ -170,8 +238,12 @@ function expandPersonalSegment(segment, wasCvSource = false) {
   });
 }
 
-export function normalizeIntakeSegments(value, fallbackText = '', attachmentCount = 0) {
+export function normalizeIntakeSegments(value, fallbackText = '', attachmentContext = 0) {
   const candidates = Array.isArray(value?.segments) ? value.segments : Array.isArray(value) ? value : [];
+  const attachments = Array.isArray(attachmentContext) ? attachmentContext : [];
+  const attachmentCount = attachments.length || Math.max(0, Number(attachmentContext) || 0);
+  const supportedPhotoIndexes = new Set(attachments.flatMap((attachment, index) =>
+    /^image\/(?:png|jpeg)$/.test(attachment?.mimeType || '') ? [index] : []));
   const normalized = candidates.slice(0, MAX_SEGMENTS).flatMap((segment, index) => {
     if (!segment || typeof segment !== 'object') return [];
     const wasCvSource = segment.kind === 'cv' || segment.kind === 'resume';
@@ -193,6 +265,9 @@ export function normalizeIntakeSegments(value, fallbackText = '', attachmentCoun
       attachmentIndexes,
       fields: normalizeIntakeFields(segment.fields),
     };
+    item.photoAttachmentIndexes = item.fields.profile.isPhoto
+      ? attachmentIndexes.filter((attachmentIndex) => supportedPhotoIndexes.has(attachmentIndex))
+      : [];
     item.extractionStatus = hasMeaningfulExtractedContent(item) ? 'extracted' : 'unreadable';
     return kind === 'personal' ? expandPersonalSegment(item, wasCvSource) : [item];
   }).slice(0, MAX_SEGMENTS);
@@ -228,7 +303,7 @@ function inferLocalKind(text) {
   return personalScore ? 'personal' : jobScore ? 'job' : cvScore ? 'resume' : 'personal';
 }
 
-function localFields(kind, text, personalCategory = 'summary') {
+function localFields(kind, text, personalCategory = 'profile') {
   const email = text.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i)?.[0] || '';
   const phone = text.match(/(?:\+?\d[\d\s().-]{7,}\d)/)?.[0] || '';
   const url = text.match(/https?:\/\/[^\s<>{}\[\]]+/i)?.[0] || '';
@@ -248,6 +323,24 @@ function localFields(kind, text, personalCategory = 'summary') {
   });
 }
 
+function localResumeFields(category, text) {
+  const fields = localFields('personal', text, category);
+  if (!['experience', 'project'].includes(category)) return fields;
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const heading = shortText(lines.shift(), 500);
+  const details = lines.map((line) => line.replace(/^[-*•]\s*/, '').trim()).filter(Boolean);
+  if (category === 'experience') {
+    return normalizeIntakeFields({
+      ...fields,
+      experiences: [{ dates: '', role: heading, organization: '', location: '', bullets: details }],
+    });
+  }
+  return normalizeIntakeFields({
+    ...fields,
+    projects: [{ dates: '', name: heading, role: '', url: '', bullets: details }],
+  });
+}
+
 const LOCAL_RESUME_SECTION_PATTERNS = [
   ['experience', /^(?:work|professional|employment|internship) experience$|^(?:工作|实习|职业)经历$/i],
   ['project', /^(?:projects?|project experience|selected projects?)$|^项目(?:经历|经验)?$/i],
@@ -258,7 +351,7 @@ const LOCAL_RESUME_SECTION_PATTERNS = [
   ['social_practice', /^(?:social practice|community practice|fieldwork)$|^(?:社会实践|社会活动|社区实践)$/i],
   ['talk', /^(?:talks?|speaking|lectures?|presentations?)$|^(?:演讲和讲座|演讲|讲座|报告)$/i],
   ['publication', /^(?:publications?|papers?|research publications?|patents?)$|^(?:论文发表|发表论文|论文|出版物|专利)$/i],
-  ['profile', /^(?:profile|professional summary|personal summary|about me|objective)$|^(?:个人简介|个人总结|自我介绍|求职意向)$/i],
+  ['profile', /^(?:profile|professional summary|personal summary|about me|objective)$|^(?:个人信息|个人简介|个人总结|自我介绍|求职意向)$/i],
 ];
 
 function localResumeSectionCategory(line) {
@@ -285,15 +378,23 @@ function splitLocalResume(text, attachmentIndexes = []) {
   });
   flush();
   if (!sections.length && text.trim()) sections.push({ category: 'profile', content: text.trim() });
-  return sections.map((section) => ({
-    kind: 'personal',
-    title: PERSONAL_CATEGORY_TITLES[section.category],
-    summary: `本地规则从简历来源中提取了${PERSONAL_CATEGORY_TITLES[section.category]}；建议使用模型复核细节。`,
-    content: section.content,
-    confidence: 0.64,
-    attachmentIndexes,
-    fields: localFields('personal', section.content, section.category),
-  }));
+  return sections.flatMap((section) => {
+    const entries = ['experience', 'project'].includes(section.category)
+      ? section.content.split(/\n\s*\n+/).map((entry) => entry.trim()).filter(Boolean)
+      : [section.content];
+    return entries.map((content, entryIndex) => {
+      const firstLine = content.split('\n').map((line) => line.trim()).find(Boolean) || '';
+      return {
+        kind: 'personal',
+        title: entries.length > 1 ? firstLine.slice(0, 120) || `${PERSONAL_CATEGORY_TITLES[section.category]} ${entryIndex + 1}` : PERSONAL_CATEGORY_TITLES[section.category],
+        summary: `本地规则从简历来源中提取了${PERSONAL_CATEGORY_TITLES[section.category]}；建议使用模型复核细节。`,
+        content,
+        confidence: 0.64,
+        attachmentIndexes,
+        fields: localResumeFields(section.category, content),
+      };
+    });
+  });
 }
 
 export function localClassifyIntake({ text = '', attachments = [] } = {}) {
@@ -302,10 +403,26 @@ export function localClassifyIntake({ text = '', attachments = [] } = {}) {
   const wholeKind = inferLocalKind(normalizedText);
   const blockKinds = blocks.map(inferLocalKind);
   const hasMixedKinds = new Set(blockKinds).size > 1 && blocks.length > 1;
-  const sourceBlocks = hasMixedKinds ? blocks : normalizedText ? [normalizedText] : [];
+  const sourceBlocks = [];
+  if (wholeKind === 'resume') {
+    let resumeParts = [];
+    const flushResume = () => {
+      if (!resumeParts.length) return;
+      sourceBlocks.push({ text: resumeParts.join('\n\n'), kind: 'resume' });
+      resumeParts = [];
+    };
+    blocks.forEach((block, index) => {
+      if (blockKinds[index] === 'job') {
+        flushResume();
+        sourceBlocks.push({ text: block, kind: 'job' });
+      } else resumeParts.push(block);
+    });
+    flushResume();
+  } else if (hasMixedKinds) {
+    blocks.forEach((block, index) => sourceBlocks.push({ text: block, kind: blockKinds[index] }));
+  } else if (normalizedText) sourceBlocks.push({ text: normalizedText, kind: wholeKind });
   const segments = [];
-  sourceBlocks.forEach((block, index) => {
-    const kind = hasMixedKinds ? blockKinds[index] : wholeKind;
+  sourceBlocks.forEach(({ text: block, kind }) => {
     if (kind === 'resume') {
       segments.push(...splitLocalResume(block));
       return;
@@ -325,7 +442,7 @@ export function localClassifyIntake({ text = '', attachments = [] } = {}) {
       content: block,
       confidence: hasMixedKinds ? 0.58 : 0.68,
       attachmentIndexes: [],
-      fields: localFields(kind, block, 'summary'),
+      fields: localFields(kind, block, 'profile'),
     });
   });
   attachments.forEach((attachment, index) => {
@@ -345,7 +462,7 @@ export function localClassifyIntake({ text = '', attachments = [] } = {}) {
         content: extractedText,
         confidence: 0.62,
         attachmentIndexes: [index],
-        fields: localFields(kind, extractedText, 'summary'),
+        fields: localFields(kind, extractedText, 'profile'),
       });
     } else {
       segments.push({
@@ -357,21 +474,21 @@ export function localClassifyIntake({ text = '', attachments = [] } = {}) {
         content: '',
         confidence: 0.35,
         attachmentIndexes: [index],
-        fields: normalizeIntakeFields({ personal: { category: attachment?.mimeType?.startsWith('image/') ? 'photo' : 'other' } }),
+        fields: normalizeIntakeFields({ personal: { category: 'profile' } }),
       });
     }
   });
-  return normalizeIntakeSegments({ segments }, normalizedText, attachments.length);
+  return normalizeIntakeSegments({ segments }, normalizedText, attachments);
 }
 
-export function parseIntakeClassifierResponse(text, fallbackText = '', attachmentCount = 0) {
+export function parseIntakeClassifierResponse(text, fallbackText = '', attachmentContext = 0) {
   const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start < 0 || end <= start) throw new Error('模型没有返回可解析的入库 JSON。');
   let parsed;
   try { parsed = JSON.parse(cleaned.slice(start, end + 1)); } catch { throw new Error('模型返回的入库 JSON 无效，请重试。'); }
-  const segments = normalizeIntakeSegments(parsed, fallbackText, attachmentCount);
+  const segments = normalizeIntakeSegments(parsed, fallbackText, attachmentContext);
   if (!segments.length) throw new Error('模型没有识别出可保存的材料。');
   return segments;
 }
@@ -415,7 +532,7 @@ export async function runIntakeClassifier({ provider = {}, text = '', attachment
     model: resolved.modelName,
     provider: resolved.providerType,
     usage: result.totalUsage || null,
-    segments: parseIntakeClassifierResponse(result.text, text, attachments.length),
+    segments: parseIntakeClassifierResponse(result.text, text, attachments),
   };
 }
 
@@ -460,11 +577,145 @@ function renderEntries(records, mapping) {
   }).join('\n');
 }
 
-export function buildGeneratedCvFiles({ items = [], jobItem = null, photoPath = '' } = {}) {
-  const selected = items.filter((item) => item?.kind === 'personal');
+const GENERATION_FIT_LEVELS = new Set(['strict', 'focused', 'balanced', 'light', 'none']);
+
+export const CV_TEMPLATE_REGISTRY = Object.freeze([
+  {
+    id: 'classic',
+    name: '经典时间轴',
+    layout: '单栏 · 日期轴',
+    description: '蓝色时间轴与清晰日期栏，适合经历较完整的通用简历。',
+    sourceName: 'geekplux/cv_resume',
+    sourceUrl: 'https://github.com/geekplux/cv_resume',
+    license: 'MIT',
+    supportsPhoto: true,
+    supportedSections: ['profile', 'summary', 'experience', 'project', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    compactSections: ['skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    slots: { profile: '顶部身份区', photo: '右上头像', summary: '个人概述', experience: '时间轴经历', project: '时间轴项目', education: '时间轴教育', skill: '技能行', additional: '补充材料' },
+  },
+  {
+    id: 'awesome',
+    name: '醒目紧凑',
+    layout: '单栏 · 红色分隔',
+    description: '居中页眉与紧凑信息密度，适合技术岗位和内容较多的一页简历。',
+    sourceName: 'Awesome-CV',
+    sourceUrl: 'https://github.com/posquit0/Awesome-CV',
+    license: 'LPPL-1.3c',
+    supportsPhoto: false,
+    supportedSections: ['profile', 'summary', 'experience', 'project', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    compactSections: ['summary', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    slots: { profile: '居中页眉', summary: '简介段', experience: '紧凑经历', project: '紧凑项目', education: '教育条目', skill: '技能条', additional: '补充栏目' },
+  },
+  {
+    id: 'sidebar',
+    name: '侧栏肖像',
+    layout: '双栏 · 个人侧栏',
+    description: '主经历区配合个人侧栏和头像，适合作品、设计与综合背景展示。',
+    sourceName: 'AltaCV',
+    sourceUrl: 'https://github.com/liantze/AltaCV',
+    license: 'LPPL-1.3+',
+    supportsPhoto: true,
+    supportedSections: ['profile', 'summary', 'experience', 'project', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    compactSections: ['summary', 'education', 'skill', 'award', 'extracurricular', 'social_practice', 'talk', 'publication'],
+    slots: { profile: '顶部姓名与右侧联系区', photo: '侧栏头像', summary: '侧栏简介', experience: '主栏经历', project: '主栏项目', education: '侧栏教育', skill: '侧栏技能', additional: '侧栏补充' },
+  },
+  {
+    id: 'banking',
+    name: '清爽银行风',
+    layout: '单栏 · ATS 友好',
+    description: '克制分隔与线性阅读顺序，适合金融、咨询和偏 ATS 的正式投递。',
+    sourceName: 'moderncv · banking style',
+    sourceUrl: 'https://github.com/moderncv/moderncv',
+    license: 'LPPL-1.3c',
+    supportsPhoto: false,
+    supportedSections: ['profile', 'summary', 'experience', 'project', 'education', 'skill', 'award', 'publication'],
+    compactSections: ['summary', 'skill', 'award', 'publication'],
+    slots: { profile: '居中身份区', summary: '职业摘要', experience: '线性经历', project: '线性项目', education: '教育经历', skill: '技能摘要', additional: '精选成果' },
+  },
+]);
+
+export function getCvTemplate(templateId = 'classic') {
+  return CV_TEMPLATE_REGISTRY.find((template) => template.id === templateId) || CV_TEMPLATE_REGISTRY[0];
+}
+
+function normalizedGenerationFit(value) {
+  return GENERATION_FIT_LEVELS.has(value) ? value : 'balanced';
+}
+
+function generationJobText(jobItem) {
+  const job = jobItem?.fields?.job || {};
+  return [job.title, job.company, job.description, ...(job.requirements || []), ...(job.keywords || [])]
+    .filter(Boolean).join(' ');
+}
+
+function relevanceTokens(jobItems) {
+  const stopWords = new Set(['about', 'after', 'also', 'and', 'are', 'for', 'from', 'have', 'into', 'our', 'that', 'the', 'their', 'this', 'with', '工作', '岗位', '负责', '要求', '以及', '相关', '能力', '经验']);
+  const counts = new Map();
+  jobItems.flatMap((item) => generationJobText(item).toLocaleLowerCase().match(/[a-z][a-z0-9+#.-]{2,}|[\p{Script=Han}]{2,6}/gu) || [])
+    .filter((token) => !stopWords.has(token))
+    .forEach((token) => counts.set(token, (counts.get(token) || 0) + 1));
+  return [...counts].sort((left, right) => right[1] - left[1] || right[0].length - left[0].length).slice(0, 80).map(([token]) => token);
+}
+
+function rankByJobRelevance(records, tokens) {
+  if (!tokens.length) return records;
+  return records.map((record, index) => {
+    const source = JSON.stringify(record).toLocaleLowerCase();
+    const score = tokens.reduce((total, token) => total + (source.includes(token) ? 1 : 0), 0);
+    return { record, index, score };
+  }).sort((left, right) => right.score - left.score || left.index - right.index).map(({ record }) => record);
+}
+
+const CHINESE_FONT_SETUP = `\\usepackage{iftex}
+\\ifXeTeX
+  \\usepackage{fontspec}
+  \\defaultfontfeatures{Ligatures=TeX}
+  \\IfFileExists{xeCJK.sty}{
+    \\usepackage{xeCJK}
+    \\IfFontExistsTF{PingFang SC}{
+      \\setCJKmainfont{PingFang SC}\\setCJKsansfont{PingFang SC}
+    }{
+      \\setCJKmainfont[BoldFont=FandolSong-Bold]{FandolSong-Regular}\\setCJKsansfont[BoldFont=FandolSong-Bold]{FandolSong-Regular}
+    }
+  }{}
+  \\IfFontExistsTF{Helvetica Neue}{\\setmainfont{Helvetica Neue}}{}
+\\else
+  \\usepackage[utf8]{inputenc}
+\\fi`;
+
+function commonPreamble({ margin = '1.45cm', accent = '21559E', muted = '60646C' } = {}) {
+  return `\\documentclass[10pt,a4paper]{article}
+\\usepackage[margin=${margin}]{geometry}
+\\usepackage[hidelinks]{hyperref}
+\\usepackage{enumitem}
+\\usepackage{xcolor}
+\\usepackage{graphicx}
+${CHINESE_FONT_SETUP}
+\\definecolor{cvaccent}{HTML}{${accent}}
+\\definecolor{cvmuted}{HTML}{${muted}}
+\\pagestyle{empty}
+\\setlength{\\parindent}{0pt}
+\\setlist[itemize]{leftmargin=1.35em,nosep,topsep=2pt}`;
+}
+
+function itemCategory(item) {
+  const personal = item?.fields?.personal?.category;
+  if (PERSONAL_CATEGORIES.has(personal)) return personal;
+  if (item?.fields?.experiences?.length) return 'experience';
+  if (item?.fields?.projects?.length) return 'project';
+  if (item?.fields?.education?.length) return 'education';
+  if (item?.fields?.skills?.length) return 'skill';
+  return 'profile';
+}
+
+function generationData(selected, targetJobs, fit, template, photoPath) {
+  const targetTitles = [...new Set(targetJobs.map((item) => item?.fields?.job?.title || item?.title).filter(Boolean))];
+  const sourceHeadline = firstValue(selected, (item) => item.fields?.profile?.headline);
   const profile = {
-    name: firstValue(selected, (item) => item.fields?.profile?.name) || 'Your Name',
-    headline: firstValue(selected, (item) => item.fields?.profile?.headline) || jobItem?.fields?.job?.title || 'Professional Profile',
+    name: firstValue(selected, (item) => item.fields?.profile?.name) || '你的姓名',
+    headline: fit === 'strict' && targetTitles.length
+      ? targetTitles.join(' / ')
+      : sourceHeadline || ((fit === 'focused' && targetTitles.length) ? targetTitles.join(' / ') : '职业概述'),
     email: firstValue(selected, (item) => item.fields?.profile?.email),
     phone: firstValue(selected, (item) => item.fields?.profile?.phone),
     location: firstValue(selected, (item) => item.fields?.profile?.location),
@@ -472,78 +723,231 @@ export function buildGeneratedCvFiles({ items = [], jobItem = null, photoPath = 
     linkedin: firstValue(selected, (item) => item.fields?.profile?.linkedin),
     github: firstValue(selected, (item) => item.fields?.profile?.github),
     summary: firstValue(selected, (item) => item.fields?.profile?.summary)
-      || firstValue(selected, (item) => item.fields?.personal?.category === 'summary' ? item.fields.personal.details : ''),
+      || firstValue(selected, (item) => itemCategory(item) === 'profile' && item.fields?.profile?.isPhoto !== true
+        ? item.fields?.personal?.details || item.content : ''),
   };
-  const experiences = uniqueRecords(selected, 'experiences');
-  const education = uniqueRecords(selected, 'education');
-  const projects = uniqueRecords(selected, 'projects');
-  const skills = uniqueRecords(selected, 'skills');
-  const fallbackNotes = selected.filter((item) => (item.content || item.fields?.personal?.details) && !item.fields?.experiences?.length
-    && !item.fields?.education?.length && !item.fields?.projects?.length && !item.fields?.skills?.length)
-    .map((item) => `${item.title}: ${item.content || item.fields.personal.details}`).slice(0, 8);
-  const contact = [profile.location, profile.phone, profile.email, profile.website, profile.linkedin, profile.github]
-    .filter(Boolean).map(latexEscape).join(' \\quad ');
-  const photo = photoPath ? `\\includegraphics[width=2.25cm,height=2.25cm,keepaspectratio]{${latexEscape(photoPath)}}` : '';
-  const jobKeywords = stringList(jobItem?.fields?.job?.keywords, 20);
-  const sections = [];
-  if (profile.summary) sections.push(`\\cvsection{Summary}\n${latexEscape(profile.summary)}`);
-  if (experiences.length) sections.push(`\\cvsection{Experience}\n${renderEntries(experiences, {
-    heading: (item) => [item.role, item.organization].filter(Boolean).join(' — '),
-    meta: () => '',
-    listKey: 'bullets',
-  })}`);
-  if (projects.length) sections.push(`\\cvsection{Projects}\n${renderEntries(projects, {
-    heading: (item) => [item.name, item.role].filter(Boolean).join(' — '),
-    meta: (item) => item.url,
-    listKey: 'bullets',
-  })}`);
-  if (education.length) sections.push(`\\cvsection{Education}\n${renderEntries(education, {
-    heading: (item) => [item.degree, item.institution].filter(Boolean).join(' — '),
-    meta: () => '',
-    listKey: 'details',
-  })}`);
-  if (skills.length) sections.push(`\\cvsection{Skills}\n${skills.map((group) => `\\skillrow{${latexEscape(group.category || 'Skills')}}{${latexEscape(stringList(group.items).join(', '))}}`).join('\n')}`);
-  if (fallbackNotes.length) sections.push(`\\cvsection{Additional Material}\n${bulletList(fallbackNotes)}`);
-  if (jobKeywords.length) sections.push(`\\cvsection{Target Role Keywords}\n${latexEscape(jobKeywords.join(' · '))}`);
+  const tokens = targetJobs.length ? relevanceTokens(targetJobs) : [];
+  const extras = new Map();
+  selected.forEach((item) => {
+    const category = itemCategory(item);
+    if (['profile', 'experience', 'project', 'education', 'skill'].includes(category)) return;
+    const content = shortText(item.content || item.fields?.personal?.details, 8_000);
+    if (!content || !template.supportedSections.includes(category)) return;
+    if (!extras.has(category)) extras.set(category, []);
+    extras.get(category).push(content);
+  });
+  const placements = selected.map((item) => {
+    const category = itemCategory(item);
+    const supported = template.supportedSections.includes(category);
+    const photoOnly = item.fields?.profile?.isPhoto === true
+      && !Object.entries(item.fields.profile).some(([key, value]) => key !== 'isPhoto' && hasTextValue(value));
+    if (photoOnly && !template.supportsPhoto) return { itemId: item.id, category: 'photo', action: 'omit', reason: '所选模板不显示个人照片；图片仍保留在项目 assets 中。' };
+    return supported
+      ? { itemId: item.id, category, action: 'place', slot: template.slots[category] || template.slots.additional }
+      : { itemId: item.id, category, action: 'agent-nearest-or-omit', reason: '模板没有直接槽位，仅在语义自然且版面允许时映射，否则省略。' };
+  });
+  return {
+    profile,
+    contactValues: [profile.location, profile.phone, profile.email, profile.website, profile.linkedin, profile.github].filter(Boolean),
+    experiences: rankByJobRelevance(uniqueRecords(selected, 'experiences'), tokens),
+    education: uniqueRecords(selected, 'education'),
+    projects: rankByJobRelevance(uniqueRecords(selected, 'projects'), tokens),
+    skills: rankByJobRelevance(uniqueRecords(selected, 'skills'), tokens),
+    extras,
+    placements,
+    photoPath,
+    renderPhoto: Boolean(photoPath && template.supportsPhoto),
+  };
+}
 
-  const resume = `% CV Studio portable adaptation of geekplux/cv_resume (MIT)
-% Original: https://github.com/geekplux/cv_resume
-\\documentclass[10pt,a4paper]{article}
-\\usepackage[margin=1.45cm]{geometry}
-\\usepackage[hidelinks]{hyperref}
-\\usepackage{enumitem}
-\\usepackage{xcolor}
-\\usepackage{graphicx}
-\\usepackage{iftex}
-\\ifXeTeX
-  \\usepackage{fontspec}
-  \\IfFileExists{xeCJK.sty}{\\usepackage{xeCJK}\\IfFontExistsTF{PingFang SC}{\\setCJKmainfont{PingFang SC}}{\\setCJKmainfont{FandolSong-Regular}}}{}
-  \\IfFontExistsTF{Arial}{\\setmainfont{Arial}}{\\IfFontExistsTF{Helvetica Neue}{\\setmainfont{Helvetica Neue}}{\\setmainfont{DejaVu Sans}}}
-\\fi
-\\definecolor{cvblue}{HTML}{21559E}
-\\definecolor{cvmuted}{HTML}{60646C}
-\\pagestyle{empty}
-\\setlength{\\parindent}{0pt}
-\\setlist[itemize]{leftmargin=1.35em,nosep,topsep=2pt}
-\\newcommand{\\cvsection}[1]{\\vspace{0.7em}{\\large\\bfseries\\color{cvblue}#1}\\par\\vspace{0.18em}\\color{cvblue}\\hrule\\color{black}\\vspace{0.42em}}
+function linearEntries(records, mapping, macro = 'cvitem') {
+  return records.map((record) => {
+    const dates = latexEscape(record.dates || '');
+    const heading = latexEscape(mapping.heading(record) || '未命名条目');
+    const meta = [mapping.meta(record), record.location].filter(Boolean).map(latexEscape).join(' · ');
+    return `\\${macro}{${dates}}{${heading}}{${meta}}\n${bulletList(record[mapping.listKey])}`;
+  }).join('\n');
+}
+
+function extraSections(data, sectionCommand) {
+  return [...data.extras].map(([category, values]) => `${sectionCommand(PERSONAL_CATEGORY_TITLES[category])}\n${bulletList(values)}`);
+}
+
+function renderClassic(data) {
+  const sections = [];
+  const section = (title) => `\\cvsection{${title}}`;
+  if (data.profile.summary) sections.push(`${section('个人概述')}\n${latexEscape(data.profile.summary)}`);
+  if (data.experiences.length) sections.push(`${section('工作经历')}\n${renderEntries(data.experiences, { heading: (item) => [item.role, item.organization].filter(Boolean).join(' — '), meta: () => '', listKey: 'bullets' })}`);
+  if (data.projects.length) sections.push(`${section('项目经历')}\n${renderEntries(data.projects, { heading: (item) => [item.name, item.role].filter(Boolean).join(' — '), meta: (item) => item.url, listKey: 'bullets' })}`);
+  if (data.education.length) sections.push(`${section('教育经历')}\n${renderEntries(data.education, { heading: (item) => [item.degree, item.institution].filter(Boolean).join(' — '), meta: () => '', listKey: 'details' })}`);
+  if (data.skills.length) sections.push(`${section('专业技能')}\n${data.skills.map((group) => `\\skillrow{${latexEscape(group.category || '技能')}}{${latexEscape(stringList(group.items).join(' · '))}}`).join('\n')}`);
+  sections.push(...extraSections(data, section));
+  const photo = data.renderPhoto ? `\\includegraphics[width=2.25cm,height=2.25cm,keepaspectratio]{${latexEscape(data.photoPath)}}` : '';
+  const contact = data.contactValues.map(latexEscape).join(' \\quad ');
+  return `% CV Studio portable adaptation inspired by geekplux/cv_resume (MIT)
+% Source: https://github.com/geekplux/cv_resume
+${commonPreamble({ accent: '21559E' })}
+\\newcommand{\\cvsection}[1]{\\vspace{0.7em}{\\large\\bfseries\\color{cvaccent}#1}\\par\\vspace{0.18em}\\color{cvaccent}\\hrule\\color{black}\\vspace{0.42em}}
 \\newcommand{\\cvitem}[3]{\\noindent\\begin{minipage}[t]{0.16\\textwidth}\\small\\color{cvmuted}#1\\end{minipage}\\hfill\\begin{minipage}[t]{0.81\\textwidth}\\textbf{#2}\\if\\relax\\detokenize{#3}\\relax\\else\\\\[-1pt]{\\small\\color{cvmuted}#3}\\fi\\end{minipage}\\par\\vspace{0.24em}}
 \\newcommand{\\skillrow}[2]{\\textbf{#1}\\hspace{0.8em}#2\\par\\vspace{0.18em}}
 \\begin{document}
 \\begin{minipage}[t]{${photo ? '0.74' : '1'}\\textwidth}
-{\\Huge\\bfseries ${latexEscape(profile.name)}}\\par
-\\vspace{0.2em}{\\large\\color{cvblue}${latexEscape(profile.headline)}}\\par
-\\vspace{0.42em}{\\small\\color{cvmuted}${contact || 'Add contact details in the Personal bank'}}
+{\\Huge\\bfseries ${latexEscape(data.profile.name)}}\\par
+\\vspace{0.2em}{\\large\\color{cvaccent}${latexEscape(data.profile.headline)}}\\par
+\\vspace{0.42em}{\\small\\color{cvmuted}${contact || '请在信息银行补充联系方式'}}
 \\end{minipage}${photo ? `\\hfill\\begin{minipage}[t]{0.21\\textwidth}\\raggedleft ${photo}\\end{minipage}` : ''}
 \\vspace{0.45em}
-${sections.join('\n') || '\\cvsection{Imported Material}\nAdd structured CV or personal material from the CV Studio intake bank.'}
+${sections.join('\n') || `${section('已选材料')}\n请在信息银行补充结构化经历。`}
 \\end{document}
 `;
-  const readme = `# Generated by CV Studio\n\nThis project uses CV Studio's portable adaptation of [geekplux/cv_resume](https://github.com/geekplux/cv_resume). The original template is Copyright (c) 2017 GeekPlux and is distributed under the MIT License; see \`LICENSE.geekplux-cv.txt\`.\n\nThe adaptation keeps the original classic blue visual direction while replacing machine-specific ModernCV and Chinese-font assumptions so it can compile with CV Studio's local Tectonic setup. The reviewed structured source used for generation is stored in \`source-data.json\`.\n`;
-  const license = `The MIT License (MIT)\n\nCopyright (c) 2017 GeekPlux <geekplux@gmail.com> (https://github.com/geekplux)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n`;
-  return {
-    'resume.tex': resume,
-    'README.md': readme,
-    'LICENSE.geekplux-cv.txt': license,
-    'source-data.json': `${JSON.stringify({ generatedAt: new Date().toISOString(), items: selected, targetJob: jobItem || null }, null, 2)}\n`,
+}
+
+function renderAwesome(data) {
+  const sections = [];
+  const section = (title) => `\\awsection{${title}}`;
+  if (data.profile.summary) sections.push(`${section('个人概述')}\n${latexEscape(data.profile.summary)}`);
+  if (data.experiences.length) sections.push(`${section('工作经历')}\n${linearEntries(data.experiences, { heading: (item) => [item.role, item.organization].filter(Boolean).join(' · '), meta: () => '', listKey: 'bullets' }, 'awentry')}`);
+  if (data.projects.length) sections.push(`${section('项目经历')}\n${linearEntries(data.projects, { heading: (item) => [item.name, item.role].filter(Boolean).join(' · '), meta: (item) => item.url, listKey: 'bullets' }, 'awentry')}`);
+  if (data.education.length) sections.push(`${section('教育经历')}\n${linearEntries(data.education, { heading: (item) => [item.degree, item.institution].filter(Boolean).join(' · '), meta: () => '', listKey: 'details' }, 'awentry')}`);
+  if (data.skills.length) sections.push(`${section('专业技能')}\n${data.skills.map((group) => `\\textbf{${latexEscape(group.category || '技能')}} \\hfill ${latexEscape(stringList(group.items).join(' · '))}\\par`).join('\n')}`);
+  sections.push(...extraSections(data, section));
+  return `% CV Studio portable adaptation inspired by Awesome-CV (LPPL-1.3c)
+% Source: https://github.com/posquit0/Awesome-CV
+${commonPreamble({ margin: '1.35cm', accent: 'B83236', muted: '666666' })}
+\\newcommand{\\awsection}[1]{\\vspace{0.55em}{\\large\\bfseries\\color{cvaccent}#1}\\hspace{0.7em}{\\color{cvaccent}\\leaders\\hrule height 0.5pt\\hfill}\\par\\vspace{0.28em}}
+\\newcommand{\\awentry}[3]{\\textbf{#2}\\hfill{\\small\\color{cvmuted}#1}\\par\\if\\relax\\detokenize{#3}\\relax\\else{\\small\\color{cvmuted}#3}\\par\\fi}
+\\begin{document}
+\\begin{center}
+{\\fontsize{26}{29}\\selectfont\\bfseries ${latexEscape(data.profile.name)}}\\par
+\\vspace{0.15em}{\\large\\color{cvaccent}${latexEscape(data.profile.headline)}}\\par
+\\vspace{0.35em}{\\small\\color{cvmuted}${data.contactValues.map(latexEscape).join(' \\enspace | \\enspace ') || '请补充联系方式'}}
+\\end{center}
+${sections.join('\n') || `${section('已选材料')}\n请在信息银行补充结构化经历。`}
+\\end{document}
+`;
+}
+
+function sidebarEducation(records) {
+  return records.map((item) => `\\textbf{${latexEscape(item.degree || item.institution || '教育经历')}}\\par
+${latexEscape(item.institution || '')}\\par{\\small\\color{cvmuted}${latexEscape([item.dates, item.location].filter(Boolean).join(' · '))}}\\par\\vspace{0.35em}`).join('\n');
+}
+
+function renderSidebar(data) {
+  const main = [];
+  const side = [];
+  const mainSection = (title) => `\\mainsection{${title}}`;
+  const sideSection = (title) => `\\sidesection{${title}}`;
+  if (data.experiences.length) main.push(`${mainSection('工作经历')}\n${linearEntries(data.experiences, { heading: (item) => [item.role, item.organization].filter(Boolean).join(' · '), meta: () => '', listKey: 'bullets' }, 'sideentry')}`);
+  if (data.projects.length) main.push(`${mainSection('项目经历')}\n${linearEntries(data.projects, { heading: (item) => [item.name, item.role].filter(Boolean).join(' · '), meta: (item) => item.url, listKey: 'bullets' }, 'sideentry')}`);
+  if (data.profile.summary) side.push(`${sideSection('个人概述')}\n${latexEscape(data.profile.summary)}`);
+  if (data.skills.length) side.push(`${sideSection('专业技能')}\n${data.skills.map((group) => `\\textbf{${latexEscape(group.category || '技能')}}\\par ${latexEscape(stringList(group.items).join(' · '))}\\par\\vspace{0.35em}`).join('\n')}`);
+  if (data.education.length) side.push(`${sideSection('教育经历')}\n${sidebarEducation(data.education)}`);
+  side.push(...extraSections(data, sideSection));
+  const photo = data.renderPhoto ? `\\begin{center}\\includegraphics[width=2.55cm,height=2.55cm,keepaspectratio]{${latexEscape(data.photoPath)}}\\end{center}` : '';
+  return `% CV Studio portable adaptation inspired by AltaCV (LPPL-1.3+)
+% Source: https://github.com/liantze/AltaCV
+${commonPreamble({ margin: '1.25cm', accent: '5B4678', muted: '69616F' })}
+\\newcommand{\\mainsection}[1]{\\vspace{0.5em}{\\Large\\bfseries\\color{cvaccent}#1}\\par\\vspace{0.16em}\\hrule\\vspace{0.35em}}
+\\newcommand{\\sidesection}[1]{\\vspace{0.55em}{\\large\\bfseries\\color{cvaccent}#1}\\par\\vspace{0.2em}}
+\\newcommand{\\sideentry}[3]{\\textbf{#2}\\hfill{\\small\\color{cvmuted}#1}\\par\\if\\relax\\detokenize{#3}\\relax\\else{\\small\\color{cvmuted}#3}\\par\\fi}
+\\begin{document}
+{\\Huge\\bfseries ${latexEscape(data.profile.name)}}\\par
+{\\large\\color{cvaccent}${latexEscape(data.profile.headline)}}\\par\\vspace{0.45em}
+\\begin{minipage}[t]{0.64\\textwidth}
+${main.join('\n') || `${mainSection('主要经历')}\n请补充工作或项目经历。`}
+\\end{minipage}\\hfill
+\\begin{minipage}[t]{0.31\\textwidth}
+${photo}
+${sideSection('联系方式')}
+${data.contactValues.map((value) => `${latexEscape(value)}\\par`).join('\n') || '请补充联系方式\\par'}
+${side.join('\n')}
+\\end{minipage}
+\\end{document}
+`;
+}
+
+function renderBanking(data) {
+  const sections = [];
+  const section = (title) => `\\banksection{${title}}`;
+  if (data.profile.summary) sections.push(`${section('职业摘要')}\n${latexEscape(data.profile.summary)}`);
+  if (data.experiences.length) sections.push(`${section('工作经历')}\n${linearEntries(data.experiences, { heading: (item) => [item.role, item.organization].filter(Boolean).join(' · '), meta: () => '', listKey: 'bullets' }, 'bankentry')}`);
+  if (data.education.length) sections.push(`${section('教育经历')}\n${linearEntries(data.education, { heading: (item) => [item.degree, item.institution].filter(Boolean).join(' · '), meta: () => '', listKey: 'details' }, 'bankentry')}`);
+  if (data.projects.length) sections.push(`${section('项目经历')}\n${linearEntries(data.projects, { heading: (item) => [item.name, item.role].filter(Boolean).join(' · '), meta: (item) => item.url, listKey: 'bullets' }, 'bankentry')}`);
+  if (data.skills.length) sections.push(`${section('专业技能')}\n${data.skills.map((group) => `\\textbf{${latexEscape(group.category || '技能')}}: ${latexEscape(stringList(group.items).join(' · '))}\\par`).join('\n')}`);
+  sections.push(...extraSections(data, section));
+  return `% CV Studio portable adaptation inspired by moderncv banking style (LPPL-1.3c)
+% Source: https://github.com/moderncv/moderncv
+${commonPreamble({ margin: '1.55cm', accent: '2F3A43', muted: '5E6971' })}
+\\newcommand{\\banksection}[1]{\\vspace{0.7em}{\\large\\bfseries\\MakeUppercase{#1}}\\par\\vspace{0.12em}\\hrule\\vspace{0.4em}}
+\\newcommand{\\bankentry}[3]{\\textbf{#2}\\hfill{\\small #1}\\par\\if\\relax\\detokenize{#3}\\relax\\else{\\small\\color{cvmuted}#3}\\par\\fi}
+\\begin{document}
+\\begin{center}
+{\\Huge\\bfseries ${latexEscape(data.profile.name)}}\\par
+\\vspace{0.15em}{\\large ${latexEscape(data.profile.headline)}}\\par
+\\vspace{0.35em}{\\small\\color{cvmuted}${data.contactValues.map(latexEscape).join(' \\quad ') || '请补充联系方式'}}
+\\end{center}
+\\vspace{0.2em}\\hrule
+${sections.join('\n') || `${section('已选材料')}\n请在信息银行补充结构化经历。`}
+\\end{document}
+`;
+}
+
+const TEMPLATE_RENDERERS = { classic: renderClassic, awesome: renderAwesome, sidebar: renderSidebar, banking: renderBanking };
+
+function templateSourcesDocument(selectedTemplate) {
+  const sources = CV_TEMPLATE_REGISTRY.map((template) => `- ${template.name} (${template.layout}): [${template.sourceName}](${template.sourceUrl}), ${template.license}.`).join('\n');
+  return `# Template sources and licenses
+
+Selected template: **${selectedTemplate.name}** (\`${selectedTemplate.id}\`).
+
+CV Studio uses an original portable implementation that follows the selected project's visual and semantic direction. It does not bundle the upstream class or its assets. Chinese support uses XeLaTeX/xeCJK with PingFang SC when installed and the offline FandolSong regular/bold fonts from the bundled TeX cache as fallback.
+
+## Researched sources
+
+${sources}
+
+Chinese font fallback reference: [CTAN Fandol](https://ctan.org/pkg/fandol), GPL-compatible fonts distributed with TeX Live.
+`;
+}
+
+const GEEKPLUX_LICENSE = `The MIT License (MIT)\n\nCopyright (c) 2017 GeekPlux <geekplux@gmail.com> (https://github.com/geekplux)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n`;
+
+export function buildGeneratedCvFiles({ items = [], jobItems = [], jobItem = null, fitLevel = 'balanced', photoPath = '', templateId = 'classic' } = {}) {
+  const selected = items.filter((item) => item?.kind === 'personal');
+  const fit = normalizedGenerationFit(fitLevel);
+  const requestedJobs = Array.isArray(jobItems) ? jobItems : [];
+  const targetJobs = fit === 'none' ? [] : requestedJobs.length ? requestedJobs : jobItem ? [jobItem] : [];
+  const template = getCvTemplate(templateId);
+  const data = generationData(selected, targetJobs, fit, template, photoPath);
+  const renderer = TEMPLATE_RENDERERS[template.id] || TEMPLATE_RENDERERS.classic;
+  const templateContract = {
+    id: template.id,
+    name: template.name,
+    layout: template.layout,
+    supportsPhoto: template.supportsPhoto,
+    supportedSections: template.supportedSections,
+    compactSections: template.compactSections,
+    slots: template.slots,
+    placementPolicy: 'Map each selected fact to the nearest semantically valid slot. Preserve the template layout. If a nonessential item has no clean slot or would damage the layout, omit it and never invent a new candidate claim.',
+    itemPlacements: data.placements,
   };
+  const files = {
+    'resume.tex': renderer(data),
+    'README.md': `# Generated by CV Studio\n\nSelected template: **${template.name}** (${template.layout}), a portable adaptation inspired by [${template.sourceName}](${template.sourceUrl}) under ${template.license}. See \`TEMPLATE-SOURCES.md\` for source and font details.\n\nThe reviewed source boundary, template slot contract, placements and omissions are stored in \`source-data.json\`.\n`,
+    'TEMPLATE-SOURCES.md': templateSourcesDocument(template),
+    'source-data.json': `${JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      generation: {
+        fitLevel: fit,
+        targetJobIds: targetJobs.map((item) => item.id),
+        templateId: template.id,
+        photo: { available: Boolean(photoPath), path: photoPath || null, rendered: data.renderPhoto },
+      },
+      template: templateContract,
+      items: selected,
+      targetJobs,
+    }, null, 2)}\n`,
+  };
+  if (template.id === 'classic') files['LICENSE.geekplux-cv.txt'] = GEEKPLUX_LICENSE;
+  return files;
 }

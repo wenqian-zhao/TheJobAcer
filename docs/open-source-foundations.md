@@ -11,7 +11,13 @@ CV Studio prefers small, composable open-source foundations over a large applica
 - **Zod** 4.4.3 (MIT): validates every Agent tool input before project code sees it.
 - **esbuild** 0.28.1 (MIT, development dependency): creates the local browser bundle used by the static Node service.
 - **PDF.js** (`pdfjs-dist` 5.4.624, Apache-2.0): renders compiled PDFs inside an application-owned canvas viewer with local page, zoom, fit, rotate, and download controls. This maintained release matches the Chromium runtime in Electron 38; only the renderer and worker are bundled, and resume content is never sent to a PDF service.
-- **geekplux/cv_resume** (MIT): visual and structural basis for the material-bank CV generator. CV Studio includes the required copyright/license notice and generates a portable blue edition that avoids the original template's unavailable offline `moderncv` dependency and machine-specific font assumptions.
+- **geekplux/cv_resume** (MIT): visual and structural basis for the classic blue timeline generator. CV Studio includes the required copyright/license notice.
+- **Awesome-CV** (LPPL-1.3c): visual reference for the compact single-column template with a centered header and red section rules.
+- **AltaCV** (LPPL-1.3+): visual and semantic reference for the photo-capable main-column/sidebar template.
+- **moderncv** banking style (LPPL-1.3c): visual reference for the restrained, linear ATS-oriented template.
+- **Fandol** (GPL; TeX Live distribution): offline Chinese Song regular/bold fallback for generated XeLaTeX/xeCJK projects. macOS uses PingFang SC when installed. The required Fandol files and `xeCJK`/`fontspec` are verified against the bundled Tectonic manifest in tests.
+
+The four CV outputs are original portable implementations built from the existing verified base packages; they do not copy or ship the upstream class files, icons, or assets. Every generated project records source URLs, license identifiers, template capabilities and its content-slot contract in `TEMPLATE-SOURCES.md` and `source-data.json`.
 
 Browser assets use only local packages and system font stacks. CV Studio does not load fonts, scripts, or styles from a CDN.
 

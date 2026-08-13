@@ -753,6 +753,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-
 .project-dialog input { border-color: var(--line-strong); background: var(--panel); }
 .cv-project-open, .cv-project-remove { border-radius: 2px; }
 .cv-project-card.current .cv-project-open { border-left: 3px solid var(--accent-ink); }
+.cv-project-card.selected .cv-project-open { border-left: 3px solid var(--accent); }
 .cv-project-entry { border-radius: 2px; }
 .resize-hud { border: 1px solid var(--line-strong); color: var(--foreground); background: var(--panel); box-shadow: var(--shadow-sm); }
 
@@ -1153,6 +1154,7 @@ body[data-theme="dark"] .pdf-fit-select { background: rgb(58 55 51 / 64%); }
 
 /* Agent-first PDF review MVP */
 .pdf-review-launch,
+.pdf-inline-launch,
 #pdf-draw-region,
 #pdf-use-page {
   width: auto;
@@ -1161,8 +1163,10 @@ body[data-theme="dark"] .pdf-fit-select { background: rgb(58 55 51 / 64%); }
   padding: 0 9px;
   white-space: nowrap;
 }
-.pdf-review-launch { border-color: color-mix(in srgb, var(--accent) 56%, var(--glass-line)); color: var(--accent-ink); background: var(--accent-soft); }
+.pdf-review-launch,
+.pdf-inline-launch { border-color: color-mix(in srgb, var(--accent) 56%, var(--glass-line)); color: var(--accent-ink); background: var(--accent-soft); }
 .pdf-review-launch span,
+.pdf-inline-launch span,
 #pdf-draw-region span,
 #pdf-use-page span { font: 600 9px/1 var(--font-sans); }
 .pdf-review-only { display: none; }
@@ -1211,6 +1215,51 @@ body[data-theme="dark"] .pdf-fit-select { background: rgb(58 55 51 / 64%); }
 }
 .pdf-annotation-hit:hover span,
 .pdf-annotation-hit.active span { background: #8f3218; transform: scale(1.08); }
+.pdf-text-hit {
+  position: absolute;
+  min-width: 4px;
+  min-height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  outline-offset: 2px;
+  background: transparent;
+  cursor: text;
+  pointer-events: auto;
+}
+.pdf-text-hit:hover,
+.pdf-text-hit:focus-visible { background: rgb(213 91 50 / 20%); box-shadow: inset 0 -2px #b94b29; }
+.pdf-inline-editor {
+  position: absolute;
+  z-index: 8;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-radius: 10px;
+  color: var(--foreground);
+  background: var(--glass-strong);
+  box-shadow: 0 16px 40px rgb(35 31 28 / 24%);
+  backdrop-filter: blur(18px);
+}
+.pdf-inline-editor[hidden] { display: none; }
+.pdf-inline-kicker { color: var(--accent-ink); font: 700 8px/1 var(--font-mono); letter-spacing: .09em; }
+.pdf-inline-editor label { font: 650 11px/1.2 var(--font-sans); }
+.pdf-inline-editor textarea {
+  width: 100%;
+  min-height: 66px;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--foreground);
+  background: var(--panel);
+  font: 12px/1.45 var(--font-sans);
+}
+.pdf-inline-editor small { color: var(--muted); font: 9px/1.35 var(--font-sans); }
+.pdf-inline-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.pdf-inline-actions button { min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--foreground); background: var(--panel); font: 600 9px/1 var(--font-sans); cursor: pointer; }
+.pdf-inline-actions button.apply { border-color: var(--accent); color: #fff; background: var(--accent); }
 
 body.pdf-review-mode { overflow: hidden; }
 body.pdf-review-mode .preview-pane {
@@ -1223,7 +1272,8 @@ body.pdf-review-mode .preview-pane {
 }
 body.pdf-review-mode .preview-pane > .pane-header { display: none; }
 body.pdf-review-mode .pdf-viewer { inset: 0; }
-body.pdf-review-mode .pdf-review-launch { display: none; }
+body.pdf-review-mode .pdf-review-launch,
+body.pdf-review-mode .pdf-inline-launch { display: none; }
 body.pdf-review-mode .pdf-review-only.pdf-tool-button { display: inline-grid; }
 body.pdf-review-mode .pdf-review-guide { display: flex; }
 body.pdf-review-mode .pdf-toolbar { z-index: 6; padding-inline: 14px; }
@@ -1267,9 +1317,11 @@ body[data-theme="dark"] .agent-visual-context { background: color-mix(in srgb, v
 
 @media (max-width: 760px) {
   .pdf-review-launch span,
+  .pdf-inline-launch span,
   #pdf-draw-region span,
   #pdf-use-page span { display: none; }
   .pdf-review-launch,
+  .pdf-inline-launch,
   #pdf-draw-region,
   #pdf-use-page { width: 30px; padding: 0; }
   .ai-settings-grid { grid-template-columns: 1fr; gap: 6px; }

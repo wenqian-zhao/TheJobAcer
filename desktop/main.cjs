@@ -158,7 +158,7 @@ async function createWindow() {
       await mainWindow.webContents.executeJavaScript("document.querySelector('[data-view=\"interview-view\"]')?.click()");
       await new Promise((resolve) => setTimeout(resolve, 700));
     }
-    if (['preview', 'pdf-review'].includes(captureView)) {
+    if (['preview', 'pdf-review', 'pdf-inline'].includes(captureView)) {
       await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
         document.querySelector('#compile-button')?.click();
         const startedAt = Date.now();
@@ -176,6 +176,16 @@ async function createWindow() {
     }
     if (captureView === 'pdf-review') {
       await mainWindow.webContents.executeJavaScript("document.querySelector('#pdf-review-button')?.click(); document.querySelector('#pdf-use-page')?.click()");
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    if (captureView === 'pdf-inline') {
+      await mainWindow.webContents.executeJavaScript(`new Promise((resolve) => {
+        document.querySelector('#pdf-inline-edit-button')?.click();
+        setTimeout(() => {
+          document.querySelector('.pdf-text-hit')?.click();
+          resolve();
+        }, 350);
+      })`);
       await new Promise((resolve) => setTimeout(resolve, 700));
     }
     const captureState = await mainWindow.webContents.executeJavaScript(`({

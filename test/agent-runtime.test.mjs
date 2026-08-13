@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MockLanguageModelV4 } from 'ai/test';
-import { createResumeAgentTools, createVisualUserContent, resolveAgentModel, runResumeAgent } from '../agent-runtime.mjs';
+import {
+  CV_FIT_POLICIES,
+  CV_GENERATION_MAX_STEPS,
+  CV_GENERATION_ROUNDS,
+  RESUME_AGENT_MAX_STEPS,
+  createResumeAgentTools,
+  createVisualUserContent,
+  resolveAgentModel,
+  runCvGenerationAgent,
+  runResumeAgent,
+} from '../agent-runtime.mjs';
 
 function normalizePath(value) {
   if (typeof value !== 'string' || value.startsWith('/') || value.includes('..')) throw new Error('unsafe path');
@@ -112,6 +122,7 @@ test('resume agent tools stage edits in memory and compile the staged snapshot',
   const result = await runtime.tools.compile_project.execute({}, {});
 
   assert.equal(result.ok, true);
+  assert.equal(runtime.getLatestCompile(), result);
   assert.equal(compiledFiles.entry, 'resume.tex');
   assert.match(compiledFiles.files.find((file) => file.path === 'resume.tex').source, /Improved/);
   assert.equal(runtime.getProposals().length, 1);
@@ -137,6 +148,23 @@ test('resume agent tools allow safe new text files but reject unsafe and binary 
     runtime.tools.propose_file_edits.execute({ edits: [{ path: 'photo.png', source: 'x', summary: 'binary' }] }, {}),
     /不允许修改该文件类型/,
   );
+});
+
+test('generation-scoped tools can restrict edits to resume.tex', async () => {
+  const runtime = createResumeAgentTools({
+    files: [{ path: 'resume.tex', source: 'base' }, { path: 'source-data.json', source: '{}' }],
+    entry: 'resume.tex',
+    normalizePath,
+    inspectResume: () => ({}),
+    compileSnapshot: async () => ({ ok: true }),
+    allowedEditPaths: ['resume.tex'],
+  });
+  await assert.rejects(
+    runtime.tools.propose_file_edits.execute({ edits: [{ path: 'source-data.json', source: '{"changed":true}', summary: 'unsafe source rewrite' }] }, {}),
+    /不允许修改该文件/,
+  );
+  await runtime.tools.propose_file_edits.execute({ edits: [{ path: 'resume.tex', source: 'generated', summary: 'safe generation edit' }] }, {});
+  assert.equal(runtime.getProposals()[0].path, 'resume.tex');
 });
 
 test('resume agent can stage recoverable file deletions but cannot delete the active entry', async () => {
@@ -220,6 +248,96 @@ test('tool-loop agent executes staged edit and compile steps before answering', 
   assert.equal(compiledSource, 'improved');
   assert.equal(result.rawResult.edits[0].source, 'improved');
   assert.deepEqual(result.trace.map((item) => item.tool), ['propose_file_edits', 'compile_project']);
+});
+
+test('CV generation agent supports more than eight grounded steps and reports real progress', async () => {
+  let call = 0;
+  const capturedPrompts = [];
+  let compiledSource = '';
+  const progress = [];
+  const usage = {
+    inputTokens: { total: 1, noCache: 1 },
+    outputTokens: { total: 1, text: 1 },
+  };
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      call += 1;
+      capturedPrompts.push(options.prompt);
+      if (call <= 7) return {
+        content: [{
+          type: 'tool-call', toolCallId: `list-${call}`, toolName: 'list_project_files', input: '{}',
+        }],
+        finishReason: { unified: 'tool-calls' }, usage, warnings: [],
+      };
+      if (call === 8) return {
+        content: [{
+          type: 'tool-call', toolCallId: 'edit-generation', toolName: 'propose_file_edits',
+          input: JSON.stringify({ edits: [{ operation: 'update', path: 'resume.tex', source: '\\documentclass{article}\\begin{document}Focused CV\\end{document}', summary: 'Tailor selected evidence.' }] }),
+        }],
+        finishReason: { unified: 'tool-calls' }, usage, warnings: [],
+      };
+      if (call === 9) return {
+        content: [{ type: 'tool-call', toolCallId: 'compile-generation', toolName: 'compile_project', input: '{}' }],
+        finishReason: { unified: 'tool-calls' }, usage, warnings: [],
+      };
+      if (call === 11) return {
+        content: [{ type: 'tool-call', toolCallId: 'review-source', toolName: 'read_project_file', input: JSON.stringify({ path: 'source-data.json' }) }],
+        finishReason: { unified: 'tool-calls' }, usage, warnings: [],
+      };
+      if (call === 12) return {
+        content: [{ type: 'tool-call', toolCallId: 'review-layout', toolName: 'compile_project', input: '{}' }],
+        finishReason: { unified: 'tool-calls' }, usage, warnings: [],
+      };
+      return {
+        content: [{ type: 'text', text: '已完成紧贴职位的 CV。' }],
+        finishReason: { unified: 'stop' }, usage, warnings: [],
+      };
+    },
+  });
+
+  const result = await runCvGenerationAgent({
+    provider: { type: 'test' },
+    modelOverride: model,
+    fitLevel: 'strict',
+    template: {
+      id: 'sidebar', name: '侧栏肖像', layout: '双栏 · 个人侧栏', supportsPhoto: true,
+      supportedSections: ['profile', 'experience', 'project', 'education', 'skill'],
+    },
+    files: [
+      { path: 'resume.tex', source: '\\documentclass{article}\\begin{document}Base\\end{document}' },
+      { path: 'source-data.json', source: JSON.stringify({ items: [{ title: 'Selected evidence' }], targetJobs: [{ title: 'Data role' }] }) },
+    ],
+    normalizePath,
+    inspectResume: () => ({}),
+    compileSnapshot: async (files) => {
+      compiledSource = files.find((file) => file.path === 'resume.tex').source;
+      return { ok: true, compiler: 'mock', layout: { pageCount: 1, pages: [{ verticalFillRatio: .82 }] } };
+    },
+    onProgress: (event) => progress.push(event),
+  });
+
+  assert.equal(RESUME_AGENT_MAX_STEPS, 12);
+  assert.equal(CV_GENERATION_ROUNDS, 2);
+  assert.equal(CV_GENERATION_MAX_STEPS, 20);
+  assert.ok(CV_GENERATION_MAX_STEPS > 8);
+  assert.equal(call, 13);
+  const prompts = JSON.stringify(capturedPrompts);
+  assert.match(prompts, /FIT LEVEL: strict — 紧贴职位/);
+  assert.match(prompts, /TEMPLATE: sidebar · 侧栏肖像 · 双栏 · 个人侧栏/);
+  assert.match(prompts, /binding layout and slot contract/);
+  assert.match(prompts, /nearest semantically valid template slot/);
+  assert.match(prompts, /omit it instead of inventing a section/);
+  assert.match(prompts, /Never render a job description/);
+  assert.match(prompts, /job description can guide emphasis[\s\S]*not evidence about the candidate/i);
+  assert.match(prompts, /Autonomous round 2 of 2/);
+  assert.match(prompts, /verticalFillRatio/);
+  assert.equal(compiledSource, '\\documentclass{article}\\begin{document}Focused CV\\end{document}');
+  assert.equal(result.rawResult.edits[0].path, 'resume.tex');
+  assert.equal(result.rounds, 2);
+  assert.equal(progress.at(-1).step, 13);
+  assert.ok(progress.some((event) => event.tools.includes('autonomous_review')));
+  assert.ok(progress.every((event) => event.maxSteps === CV_GENERATION_MAX_STEPS));
+  assert.match(CV_FIT_POLICIES.none.instruction, /Ignore job descriptions entirely/);
 });
 
 test('Hermes uses its server-side agent directly with a bounded project snapshot', async () => {
